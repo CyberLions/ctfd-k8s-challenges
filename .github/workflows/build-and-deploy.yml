@@ -1,0 +1,99 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [ "main" , "staging" ]
+
+jobs:
+  build-k8s-client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract branch name
+        shell: bash
+        run: echo "branch=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}" >> $GITHUB_OUTPUT
+        id: extract_branch
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to CCSO Docker Registry
+        uses: docker/login-action@v3
+        with:
+          registry: registry.psuccso.org
+          username: robot$ctfd-k8s-challenges+github
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Generate k8s-client Tag Names
+        run: |
+          echo "${{ steps.extract_branch.outputs.branch }}"
+          if [ "${{ steps.extract_branch.outputs.branch }}" = "main" ]; then
+            echo "TAG_LATEST=k8s-client:latest" >> $GITHUB_ENV
+            echo "TAG_COMMIT=k8s-client:$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          elif [ "${{ steps.extract_branch.outputs.branch }}" = "staging" ]; then
+            echo "TAG_LATEST=k8s-client-stage:latest" >> $GITHUB_ENV
+            echo "TAG_COMMIT=k8s-client-stage:$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          else
+            exit 0
+          fi
+
+      - name: Build and push k8s-client
+        uses: docker/build-push-action@v6
+        with:
+          context: ./k8s-client
+          file: .docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            registry.psuccso.org/ctfd-k8s-challenges/${{ env.TAG_LATEST }}
+            registry.psuccso.org/ctfd-k8s-challenges/${{ env.TAG_COMMIT }}
+          cache-from: type=registry,ref=registry.psuccso.org/ctfd-k8s-challenges/${{ env.TAG_LATEST }}
+          cache-to: type=inline
+
+  deploy-rancher:
+    needs: [build-k8s-client]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract branch name
+        shell: bash
+        run: echo "branch=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}" >> $GITHUB_OUTPUT
+        id: extract_branch
+
+      - name: Redeploy Rancher
+        run: |
+          url='https://rancher.psuccso.org'
+          cluster=local
+          token=${{ secrets.RANCHER_TOKEN }}
+
+          redeploy() {
+              local app=$1
+              pod_upgrade_body=$(curl -s -u "$token" \
+              -k $url/k8s/clusters/$cluster/v1/apps.deployments/$namespace/$app \
+              -X GET \
+              -H 'Accept: application/json' \
+              -H 'Content-Type: application/json' \
+              -H 'Pragma: no-cache' \
+              -H 'Cache-Control: no-cache' 2>&1 | sed  "s/\"cattle\.io\/timestamp\"\:\"[0-9T:Z-]*\"/\"cattle\.io\/timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"/g")
+
+              curl -u "$token" \
+              -k -s $url/k8s/clusters/$cluster/v1/apps.deployments/$namespace/$app \
+              -X PUT \
+              -H 'Accept: application/json' \
+              -H 'Content-Type: application/json' \
+              --data-binary "$pod_upgrade_body" --compressed
+          }
+
+          echo "${{ steps.extract_branch.outputs.branch }}"
+          if [ "${{ steps.extract_branch.outputs.branch }}" = "main" ]; then
+            namespace=ctfd-k8s-challenges
+            redeploy "k8s-client"
+          elif [ "${{ steps.extract_branch.outputs.branch }}" = "staging" ]; then
+            namespace=ctfd-k8s-challenges-staging
+            redeploy "k8s-client"
+          else
+            exit 0
+          fi

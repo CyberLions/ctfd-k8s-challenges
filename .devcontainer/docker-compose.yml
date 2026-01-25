@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # Node.js dev container (main workspace)
+  node:
+    build:
+      context: ../k8s-client
+      dockerfile: .devcontainer/Dockerfile
+    volumes:
+      - \\wsl.localhost\Ubuntu-24.04\home\tgm\CCSO\Workspaces\ctfd-k8s-challenges\k8s-client:/workspace
+    working_dir: /workspace
+    networks:
+      - app-network
+    ports:
+      - "3011:3000"
+    environment:
+      - NODE_ENV=development
+      - CHOKIDAR_USEPOLLING=true
+      - CHOKIDAR_INTERVAL=1000
+
+  # CTFd
+  ctfd:
+    image: registry.psuccso.org/ctfd-sso/ctfd-sso:latest
+    networks:
+      - app-network
+    ports:
+      - "3000:8000"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      - SECRET_KEY=devcontainer-secret-key-change-in-production
+      - DATABASE_URL=mysql+pymysql://ctfd:ctfd@mariadb:3306/ctfd
+      - REDIS_URL=redis://redis:6379/0
+      - CACHE_REDIS_URL=redis://redis:6379/0
+    volumes:
+      # Mount plugin into CTFd plugins directory (adjust path if your image differs)
+      - \\wsl.localhost\Ubuntu-24.04\home\tgm\CCSO\Workspaces\ctfd-k8s-challenges\ctfd-plugin:/opt/CTFd/CTFd/plugins/k8s-challenges
+
+  # Redis
+  redis:
+    image: redis:alpine
+    networks:
+      - app-network
+
+  # MariaDB
+  mariadb:
+    image: mariadb:11.5.2
+    networks:
+      - app-network
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=ctfd
+      - MYSQL_USER=ctfd
+      - MYSQL_PASSWORD=ctfd
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # phpMyAdmin
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    networks:
+      - app-network
+    ports:
+      - "3012:80"
+    environment:
+      - PMA_HOST=mariadb
+      - PMA_USER=root
+      - PMA_PASSWORD=root
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+volumes:
+  mariadb_data:
+
+networks:
+  app-network:
+    driver: bridge

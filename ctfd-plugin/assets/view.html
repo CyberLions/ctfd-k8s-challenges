@@ -1,0 +1,19 @@
+<div id="container-challenge-ctl" class="form-group" data-challenge-id="{{ id }}">
+  <div id="container-idle">
+    <button type="button" class="btn btn-primary" id="container-start-btn">Start Instance</button>
+  </div>
+  <div id="container-loading" style="display:none">
+    <button type="button" class="btn btn-primary" disabled><span class="spinner-border spinner-border-sm"></span> Starting…</button>
+  </div>
+  <div id="container-active" style="display:none">
+    <p><strong>Connection:</strong> <a id="container-connection" href="#" target="_blank" rel="noopener"></a><span id="container-nc" class="font-monospace"></span></p>
+    <p><strong>Expires in:</strong> <span id="container-timer">--:--:--</span></p>
+    <button type="button" class="btn btn-outline-secondary btn-sm" id="container-stop-btn">Stop</button>
+    <button type="button" class="btn btn-outline-secondary btn-sm" id="container-renew-btn">Reset</button>
+  </div>
+</div>
+<div class="form-group">
+  <label for="challenge-input">Flag</label>
+  <input type="text" class="form-control" id="challenge-input" name="submission" placeholder="CTF{…}">
+</div>
+<input type="hidden" id="challenge-id" value="{{ id }}">

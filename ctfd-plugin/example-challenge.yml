@@ -1,0 +1,17 @@
+# Example for ctfcli: type "container" and extra are used by the plugin.
+name: "Impossible Web"
+author: "CyberLions"
+category: "Web"
+description: "Can you hack this?"
+value: 500
+type: "container"
+
+extra:
+  image: "registry.cyberlions.com/web/impossible:latest"
+  port: 8080
+  connection_type: "http"
+  memory_limit: "512Mi"
+  timeout: 3600
+
+flags:
+  - "CTF{sample}"

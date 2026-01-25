@@ -1,0 +1,21 @@
+{
+  "name": "ctfd-k8s-orchestrator",
+  "version": "1.0.0",
+  "description": "Stateless Node.js API bridging CTFd (Control Plane) and on‑prem Kubernetes (Data Plane) for container challenges",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@fastify/swagger": "^8.15.0",
+    "@fastify/swagger-ui": "^2.0.0",
+    "@kubernetes/client-node": "^0.21.0",
+    "fastify": "^4.28.1",
+    "zod": "^3.23.8"
+  }
+}

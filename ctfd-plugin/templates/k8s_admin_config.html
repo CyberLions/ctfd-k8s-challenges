@@ -1,0 +1,20 @@
+{% extends "admin/base.html" %}
+
+{% block content %}
+<div class="section">
+  <h3>K8s Container Challenges</h3>
+  <p>Configure the on‑prem Node.js orchestrator. Set the API key to match <code>X-API-KEY</code> on the orchestrator.</p>
+  <form method="POST" action="{{ request.script_root or '' }}/admin/plugins/k8s-challenges">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"/>
+    <div class="form-group">
+      <label for="orchestrator_url">Orchestrator URL</label>
+      <input id="orchestrator_url" type="url" name="orchestrator_url" class="form-control" placeholder="https://api.sillyctf.psuccso.org" value="{{ orchestrator_url }}">
+    </div>
+    <div class="form-group">
+      <label for="api_key">API Key</label>
+      <input id="api_key" type="password" name="api_key" class="form-control" placeholder="(leave blank to keep existing)" value="{{ api_key }}" autocomplete="off">
+    </div>
+    <button type="submit" class="btn btn-primary">Save</button>
+  </form>
+</div>
+{% endblock %}

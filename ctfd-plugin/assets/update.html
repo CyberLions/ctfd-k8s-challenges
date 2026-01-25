@@ -1,0 +1,27 @@
+<div class="form-group">
+  <label>Docker Image</label>
+  <input type="text" class="form-control" name="image" value="{{ image or '' }}" placeholder="registry.example.com/challenges/web:v1" required>
+</div>
+<div class="form-group">
+  <label>Port</label>
+  <input type="number" class="form-control" name="port" value="{{ port or 80 }}" min="1" max="65535">
+</div>
+<div class="form-group">
+  <label>Connection Type</label>
+  <select class="form-control" name="connection_type">
+    <option value="http" {{ 'selected' if (connection_type or 'http') == 'http' else '' }}>HTTP / Web</option>
+    <option value="tcp" {{ 'selected' if connection_type == 'tcp' else '' }}>TCP</option>
+  </select>
+</div>
+<div class="form-group">
+  <label>Memory Limit</label>
+  <input type="text" class="form-control" name="memory_limit" value="{{ memory_limit or '256Mi' }}" placeholder="256Mi">
+</div>
+<div class="form-group">
+  <label>CPU Limit (optional)</label>
+  <input type="text" class="form-control" name="cpu_limit" value="{{ cpu_limit or '' }}" placeholder="500m">
+</div>
+<div class="form-group">
+  <label>Timeout (seconds)</label>
+  <input type="number" class="form-control" name="timeout" value="{{ timeout or 3600 }}" min="60" placeholder="3600">
+</div>
