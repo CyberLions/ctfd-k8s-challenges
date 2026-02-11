@@ -85,10 +85,28 @@
       How users will connect to the container
     </small>
   </label>
-  <select class="form-control" name="connection_type">
+  <select class="form-control" name="connection_type" id="connection-type-select">
     <option value="http">HTTP / Web</option>
     <option value="tcp">TCP</option>
   </select>
+</div>
+
+<div class="form-group prefix-group-conditional" id="prefix-group" data-conditional="http">
+  <label>
+    Subdomain Prefix:<br>
+    <small class="form-text text-muted">
+      Prefix for the challenge subdomain (e.g., "web-intro" → web-intro-abc123.domain.org). Use lowercase letters, numbers, and hyphens only. Only used for HTTP / Web challenges.
+    </small>
+  </label>
+  <input 
+    type="text" 
+    class="form-control" 
+    name="prefix" 
+    id="prefix-input"
+    placeholder="web-challenge" 
+    pattern="[a-z0-9-]+"
+    data-required-when="http"
+  >
 </div>
 
 <div class="form-group">

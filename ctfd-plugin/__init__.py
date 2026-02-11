@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 import requests
-from flask import abort, redirect, render_template, request, url_for
+from flask import redirect, render_template, request, url_for
 from sqlalchemy import inspect
 from CTFd.models import Challenges, Configs, Flags, Solves, db
 from CTFd.plugins import register_plugin_assets_directory
@@ -120,11 +120,13 @@ class ContainerChallengeClass(BaseChallenge):
                 "templates": cls.templates,
                 "scripts": cls.scripts,
             },
-            "image": getattr(row, "image", None),
+            "image": getattr(row, "image", ""),
             "port": getattr(row, "port", 80),
+            "command": getattr(row, "command", ""),
             "connection_type": getattr(row, "connection_type", "http"),
+            "prefix": getattr(row, "prefix", ""),
             "memory_limit": getattr(row, "memory_limit", "256Mi"),
-            "cpu_limit": getattr(row, "cpu_limit"),
+            "cpu_limit": getattr(row, "cpu_limit", ""),
             "timeout": getattr(row, "timeout", 3600),
         }
         return data
@@ -142,11 +144,11 @@ class ContainerChallengeClass(BaseChallenge):
             return challenge
 
         container_keys = (
-            "image", "port", "command", "connection_type", "cpu_limit", "memory_limit", "timeout",
+            "image", "port", "command", "connection_type", "prefix", "cpu_limit", "memory_limit", "timeout",
         )
         if "image" in data and (data.get("image") or "").strip():
             container.image = (data["image"] or "").strip()
-        for k in ("command", "connection_type", "cpu_limit", "memory_limit"):
+        for k in ("command", "connection_type", "prefix", "cpu_limit", "memory_limit"):
             if k in data:
                 setattr(container, k, data[k])
         if "port" in data:
@@ -313,11 +315,13 @@ class ContainerDynamicChallengeClass(BaseChallenge):
                 "templates": cls.templates,
                 "scripts": cls.scripts,
             },
-            "image": getattr(row, "image", None),
+            "image": getattr(row, "image", ""),
             "port": getattr(row, "port", 80),
+            "command": getattr(row, "command", ""),
             "connection_type": getattr(row, "connection_type", "http"),
+            "prefix": getattr(row, "prefix", ""),
             "memory_limit": getattr(row, "memory_limit", "256Mi"),
-            "cpu_limit": getattr(row, "cpu_limit"),
+            "cpu_limit": getattr(row, "cpu_limit", ""),
             "timeout": getattr(row, "timeout", 3600),
             "initial_value": initial,
             "decay_function": function,
@@ -341,14 +345,14 @@ class ContainerDynamicChallengeClass(BaseChallenge):
             return challenge
 
         container_keys = (
-            "image", "port", "command", "connection_type", "cpu_limit", "memory_limit", "timeout",
+            "image", "port", "command", "connection_type", "prefix", "cpu_limit", "memory_limit", "timeout",
             "initial_value", "decay_function", "decay", "minimum_value",
         )
         
         # Update container-specific fields
         if "image" in data and (data.get("image") or "").strip():
             container.image = (data["image"] or "").strip()
-        for k in ("command", "connection_type", "cpu_limit", "memory_limit"):
+        for k in ("command", "connection_type", "prefix", "cpu_limit", "memory_limit"):
             if k in data:
                 setattr(container, k, data[k])
         if "port" in data:
@@ -474,6 +478,7 @@ def _container_api(app):
         
         flag = Flags.query.filter_by(challenge_id=row.id).first()
         flag_val = (flag.content or "") if flag else ""
+        
         body = {
             "challenge_id": str(row.id),
             "team_id": aid,
@@ -482,9 +487,13 @@ def _container_api(app):
             "duration": int(row.timeout or 3600),
             "internal_port": int(row.port or 80),
             "memory_limit": row.memory_limit or "256Mi",
-            "cpu_limit": row.cpu_limit or None,
             "env_vars": {"FLAG": flag_val},
         }
+        
+        # Add cpu_limit only if it's set
+        if row.cpu_limit:
+            body["cpu_limit"] = row.cpu_limit
+        
         code, out = _orchestrator_request("POST", "/deploy", json=body)
         if code in (200, 201):
             return {"success": True, "data": out}
@@ -540,7 +549,6 @@ def _container_api(app):
 
 def _admin_routes(app):
     from flask import Blueprint
-    from CTFd.utils.security.csrf import validate_nonce
 
     bp = Blueprint("k8s_config", __name__, template_folder="templates")
 
@@ -548,28 +556,87 @@ def _admin_routes(app):
     @admins_only
     def _admin():
         if request.method == "POST":
-            # Validate CSRF nonce
-            nonce = request.form.get("nonce")
-            if not validate_nonce(nonce):
-                return abort(403)
+            # Save all configuration values
+            config_mapping = {
+                "k8s_orchestrator_url": (request.form.get("orchestrator_url") or "").strip(),
+                "k8s_api_key": (request.form.get("api_key") or "").strip(),
+                "k8s_domain_suffix": (request.form.get("domain_suffix") or "").strip(),
+                "k8s_tcp_port_range": (request.form.get("tcp_port_range") or "").strip(),
+                "k8s_max_containers_global": request.form.get("max_containers_global", "100"),
+                "k8s_max_containers_per_team": request.form.get("max_containers_per_team", "5"),
+            }
             
-            u = (request.form.get("orchestrator_url") or "").strip()
-            k = (request.form.get("api_key") or "").strip()
-            for name, v in (("k8s_orchestrator_url", u), ("k8s_api_key", k)):
+            for name, value in config_mapping.items():
                 r = Configs.query.filter_by(key=name).first()
                 if r:
-                    r.value = v
+                    r.value = value
                 else:
-                    db.session.add(Configs(key=name, value=v))
+                    db.session.add(Configs(key=name, value=value))
             db.session.commit()
             return redirect(url_for("k8s_config._admin"))
-        u = _get_config("k8s_orchestrator_url", "")
-        k = _get_config("k8s_api_key", "")
+        
+        # GET request - load current values
         return render_template(
             "k8s_admin_config.html",
-            orchestrator_url=u,
-            api_key=k,
+            orchestrator_url=_get_config("k8s_orchestrator_url", ""),
+            api_key=_get_config("k8s_api_key", ""),
+            domain_suffix=_get_config("k8s_domain_suffix", ".sillyctf-challenges.psuccso.org"),
+            tcp_port_range=_get_config("k8s_tcp_port_range", "30000-32767"),
+            max_containers_global=_get_config("k8s_max_containers_global", "100"),
+            max_containers_per_team=_get_config("k8s_max_containers_per_team", "5"),
         )
+
+    @bp.route("/admin/plugins/k8s-challenges/test-connection", methods=["GET"])
+    @admins_only
+    def _test_connection():
+        """Test connection to orchestrator using provided or saved credentials."""
+        from flask import jsonify
+        
+        # Get URL and API key from query params (for testing unsaved values) or from config
+        orchestrator_url = (request.args.get("orchestrator_url") or "").strip()
+        api_key = (request.args.get("api_key") or "").strip()
+        
+        # Fall back to saved config if not provided
+        if not orchestrator_url:
+            orchestrator_url = _get_config("k8s_orchestrator_url", "").rstrip("/")
+        else:
+            orchestrator_url = orchestrator_url.rstrip("/")
+        
+        if not api_key:
+            api_key = _get_config("k8s_api_key", "")
+        
+        if not orchestrator_url:
+            return jsonify({"success": False, "error": "Orchestrator URL not configured"}), 400
+        
+        # Test connection by calling /health endpoint
+        url = f"{orchestrator_url}/health"
+        headers = {}
+        if api_key:
+            headers["X-API-KEY"] = api_key
+        
+        try:
+            r = requests.get(url, headers=headers, timeout=10)
+            if r.status_code == 200:
+                response_data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+                return jsonify({
+                    "success": True,
+                    "message": "Connection successful",
+                    "status_code": r.status_code,
+                    "response": response_data
+                })
+            else:
+                error_msg = r.text or f"HTTP {r.status_code}"
+                return jsonify({
+                    "success": False,
+                    "error": f"Connection failed: {error_msg}",
+                    "status_code": r.status_code
+                }), 400
+        except requests.exceptions.Timeout:
+            return jsonify({"success": False, "error": "Connection timeout - orchestrator did not respond within 10 seconds"}), 400
+        except requests.exceptions.ConnectionError as e:
+            return jsonify({"success": False, "error": f"Connection error: {str(e)}"}), 400
+        except Exception as e:
+            return jsonify({"success": False, "error": f"Unexpected error: {str(e)}"}), 500
 
     app.register_blueprint(bp)
 

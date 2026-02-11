@@ -9,6 +9,7 @@ extra:
   image: "registry.cyberlions.com/web/dynamic:latest"
   port: 8080
   connection_type: "http"
+  prefix: "web-dynamic"          # REQUIRED for HTTP challenges - subdomain prefix
   memory_limit: "512Mi"
   timeout: 3600
   initial_value: 500

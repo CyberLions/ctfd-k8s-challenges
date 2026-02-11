@@ -14,15 +14,24 @@ class ContainerChallenge(Challenges):
     port = db.Column(db.Integer, nullable=True, default=80)
     command = db.Column(db.Text, nullable=True)
     connection_type = db.Column(db.String(32), nullable=True, default="http")  # http | tcp
+    prefix = db.Column(db.String(64), nullable=True)  # Subdomain prefix for HTTP challenges
     cpu_limit = db.Column(db.String(32), nullable=True)
     memory_limit = db.Column(db.String(32), nullable=True, default="256Mi")
     timeout = db.Column(db.Integer, nullable=True, default=3600)
 
     def __init__(self, *args, **kwargs):
+        from CTFd.exceptions.challenges import ChallengeCreateException
+        
         super().__init__(*args, **kwargs)
-        if not self.image:
-            from CTFd.exceptions.challenges import ChallengeCreateException
-            raise ChallengeCreateException("Docker image is required for container challenges")
+        
+        # Only validate when explicitly creating (kwargs present), not when loading from DB
+        if kwargs:
+            if not self.image:
+                raise ChallengeCreateException("Docker image is required for container challenges")
+            
+            # Validate prefix is provided for HTTP challenges
+            if self.connection_type == "http" and not self.prefix:
+                raise ChallengeCreateException("Prefix is required for HTTP/web challenges")
 
 
 class ContainerDynamicChallenge(Challenges):
@@ -34,6 +43,7 @@ class ContainerDynamicChallenge(Challenges):
     port = db.Column(db.Integer, nullable=True, default=80)
     command = db.Column(db.Text, nullable=True)
     connection_type = db.Column(db.String(32), nullable=True, default="http")  # http | tcp
+    prefix = db.Column(db.String(64), nullable=True)  # Subdomain prefix for HTTP challenges
     cpu_limit = db.Column(db.String(32), nullable=True)
     memory_limit = db.Column(db.String(32), nullable=True, default="256Mi")
     timeout = db.Column(db.Integer, nullable=True, default=3600)
@@ -104,24 +114,30 @@ class ContainerDynamicChallenge(Challenges):
         
         super().__init__(*args, **kwargs)
         
-        # Validate required fields
-        if not self.image:
-            raise ChallengeCreateException("Docker image is required for container challenges")
-        
-        # Handle initial value - can come as "initial" or "initial_value"
-        if "initial" in kwargs and not self.container_initial:
-            self.container_initial = kwargs["initial"]
-        if "initial_value" in kwargs and not self.container_initial:
-            self.container_initial = kwargs["initial_value"]
-        
-        if self.container_initial is None:
-            raise ChallengeCreateException("Initial value is required for dynamic challenges")
-        
-        if self.container_decay is None:
-            raise ChallengeCreateException("Decay is required for dynamic challenges")
-        
-        if self.container_minimum is None:
-            raise ChallengeCreateException("Minimum value is required for dynamic challenges")
-        
-        # Set the challenge value to initial value
-        self.value = self.container_initial
+        # Only validate when explicitly creating (kwargs present), not when loading from DB
+        if kwargs:
+            # Validate required fields
+            if not self.image:
+                raise ChallengeCreateException("Docker image is required for container challenges")
+            
+            # Validate prefix is provided for HTTP challenges
+            if self.connection_type == "http" and not self.prefix:
+                raise ChallengeCreateException("Prefix is required for HTTP/web challenges")
+            
+            # Handle initial value - can come as "initial" or "initial_value"
+            if "initial" in kwargs and not self.container_initial:
+                self.container_initial = kwargs["initial"]
+            if "initial_value" in kwargs and not self.container_initial:
+                self.container_initial = kwargs["initial_value"]
+            
+            if self.container_initial is None:
+                raise ChallengeCreateException("Initial value is required for dynamic challenges")
+            
+            if self.container_decay is None:
+                raise ChallengeCreateException("Decay is required for dynamic challenges")
+            
+            if self.container_minimum is None:
+                raise ChallengeCreateException("Minimum value is required for dynamic challenges")
+            
+            # Set the challenge value to initial value
+            self.value = self.container_initial

@@ -25,6 +25,7 @@ Static value container challenges where the point value remains constant.
 - `image`: Docker image to deploy
 - `port`: Internal container port (default: 80)
 - `connection_type`: "http" or "tcp"
+- `prefix`: Subdomain prefix (required for HTTP, e.g., "web-intro")
 - `memory_limit`: Memory limit (default: "256Mi")
 - `cpu_limit`: CPU limit (optional)
 - `timeout`: Instance timeout in seconds (default: 3600)
@@ -41,6 +42,7 @@ extra:
   image: "registry.example.com/challenges/web:v1"
   port: 8080
   connection_type: "http"
+  prefix: "web-intro"
   memory_limit: "512Mi"
   timeout: 3600
 
@@ -81,6 +83,7 @@ extra:
   image: "registry.example.com/challenges/web:v2"
   port: 8080
   connection_type: "http"
+  prefix: "web-pwn"
   memory_limit: "512Mi"
   timeout: 3600
   initial_value: 500
@@ -120,8 +123,20 @@ See `k8s-client/` for orchestrator implementation.
 
 Navigate to **Admin Panel → Plugins → K8s Container Challenges** to configure:
 
-- **Orchestrator URL**: URL of the Kubernetes orchestrator API
-- **API Key**: Shared secret for authenticating with orchestrator
+### Orchestrator Connection
+- **Orchestrator URL**: URL of the Kubernetes orchestrator API (e.g., `https://api.sillyctf.psuccso.org`)
+- **API Key**: Shared secret for authenticating with orchestrator (must match orchestrator's `X_API_KEY`)
+
+### Network Configuration
+- **Domain Suffix**: Domain suffix for HTTP/web challenges (e.g., `.sillyctf-challenges.psuccso.org`)
+  - Requires wildcard DNS: `*.sillyctf-challenges.psuccso.org` → your server IP
+  - Challenges will be at: `{prefix}-{random}.sillyctf-challenges.psuccso.org`
+- **TCP Port Range**: Port range for TCP challenges (e.g., `30000-32767`)
+  - Random ports from this range are assigned to TCP instances
+
+### Container Limits
+- **Max Containers (Global)**: Total container limit across all teams (default: 100)
+- **Max Containers (Per Team/User)**: Concurrent instances per team (default: 5)
 
 ## User Experience
 
@@ -137,7 +152,7 @@ When a user views a container challenge:
 
 ### `container_challenges` table
 - Extends `challenges` table
-- Fields: `image`, `port`, `command`, `connection_type`, `cpu_limit`, `memory_limit`, `timeout`
+- Fields: `image`, `port`, `command`, `connection_type`, `prefix`, `cpu_limit`, `memory_limit`, `timeout`
 
 ### `container_dynamic_challenges` table
 - Extends `challenges` table

@@ -22,6 +22,8 @@
       <form method="POST" action="{{ request.script_root or '' }}/admin/plugins/k8s-challenges">
         <input type="hidden" name="nonce" value="{{ Session.nonce }}"/>
         
+        <h4 class="mb-3">Orchestrator Connection</h4>
+        
         <div class="form-group">
           <label for="orchestrator_url">
             Orchestrator URL
@@ -47,14 +49,103 @@
               Shared secret for authenticating with the orchestrator. Must match the <code>X_API_KEY</code> environment variable on your orchestrator.
             </small>
           </label>
+          <div class="input-group">
+            <input 
+              id="api_key" 
+              type="password" 
+              name="api_key" 
+              class="form-control" 
+              placeholder="Leave blank to keep existing key" 
+              value="{{ api_key }}" 
+              autocomplete="off"
+            >
+            <div class="input-group-append">
+              <button type="button" id="test_connection_btn" class="btn btn-outline-secondary">
+                <i class="fas fa-plug"></i> Test Connection
+              </button>
+            </div>
+          </div>
+          <div id="test_connection_result" class="mt-2" style="display: none;"></div>
+        </div>
+        
+        <hr>
+        <h4 class="mb-3">Network Configuration</h4>
+        
+        <div class="form-group">
+          <label for="domain_suffix">
+            Domain Suffix
+            <small class="form-text text-muted">
+              Domain suffix for HTTP/web challenges (e.g., <code>.sillyctf-challenges.psuccso.org</code>). 
+              Challenges will be accessible at <code>{prefix}-{random}.sillyctf-challenges.psuccso.org</code>
+            </small>
+          </label>
           <input 
-            id="api_key" 
-            type="password" 
-            name="api_key" 
+            id="domain_suffix" 
+            type="text" 
+            name="domain_suffix" 
             class="form-control" 
-            placeholder="Leave blank to keep existing key" 
-            value="{{ api_key }}" 
-            autocomplete="off"
+            placeholder=".sillyctf-challenges.psuccso.org" 
+            value="{{ domain_suffix }}"
+            required
+          >
+        </div>
+        
+        <div class="form-group">
+          <label for="tcp_port_range">
+            TCP Port Range
+            <small class="form-text text-muted">
+              Port range for TCP challenges (format: <code>30000-32767</code>). 
+              Random unique ports from this range will be assigned to TCP challenge instances.
+            </small>
+          </label>
+          <input 
+            id="tcp_port_range" 
+            type="text" 
+            name="tcp_port_range" 
+            class="form-control" 
+            placeholder="30000-32767" 
+            value="{{ tcp_port_range }}"
+            pattern="[0-9]+-[0-9]+"
+            required
+          >
+        </div>
+        
+        <hr>
+        <h4 class="mb-3">Container Limits</h4>
+        
+        <div class="form-group">
+          <label for="max_containers_global">
+            Max Containers (Global)
+            <small class="form-text text-muted">
+              Maximum total number of container instances across all teams/users. Set to 0 for unlimited.
+            </small>
+          </label>
+          <input 
+            id="max_containers_global" 
+            type="number" 
+            name="max_containers_global" 
+            class="form-control" 
+            placeholder="100" 
+            value="{{ max_containers_global or 100 }}"
+            min="0"
+          >
+        </div>
+        
+        <div class="form-group">
+          <label for="max_containers_per_team">
+            Max Containers (Per Team/User)
+            <small class="form-text text-muted">
+              Maximum number of concurrent container instances per team or user. Set to 0 for unlimited.
+            </small>
+          </label>
+          <input 
+            id="max_containers_per_team" 
+            type="number" 
+            name="max_containers_per_team" 
+            class="form-control" 
+            placeholder="5" 
+            value="{{ max_containers_per_team or 5 }}"
+            min="0"
           >
         </div>
         
@@ -101,4 +192,58 @@
     </div>
   </div>
 </div>
+
+<script>
+(function() {
+  const testBtn = document.getElementById('test_connection_btn');
+  const resultDiv = document.getElementById('test_connection_result');
+  const orchestratorUrlInput = document.getElementById('orchestrator_url');
+  const apiKeyInput = document.getElementById('api_key');
+  
+  if (!testBtn || !resultDiv) return;
+  
+  testBtn.addEventListener('click', async function() {
+    const orchestratorUrl = orchestratorUrlInput.value.trim();
+    const apiKey = apiKeyInput.value.trim();
+    
+    if (!orchestratorUrl) {
+      showResult('error', 'Please enter an Orchestrator URL first');
+      return;
+    }
+    
+    // Disable button and show loading state
+    testBtn.disabled = true;
+    testBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
+    resultDiv.style.display = 'none';
+    
+    try {
+      const params = new URLSearchParams();
+      if (orchestratorUrl) params.append('orchestrator_url', orchestratorUrl);
+      if (apiKey) params.append('api_key', apiKey);
+      const url = '{{ request.script_root or "" }}/admin/plugins/k8s-challenges/test-connection?' + params.toString();
+      const response = await fetch(url, { method: 'GET' });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        showResult('success', 'Connection successful! Orchestrator is reachable.');
+      } else {
+        showResult('error', data.error || 'Connection failed');
+      }
+    } catch (error) {
+      showResult('error', 'Failed to test connection: ' + error.message);
+    } finally {
+      // Re-enable button
+      testBtn.disabled = false;
+      testBtn.innerHTML = '<i class="fas fa-plug"></i> Test Connection';
+    }
+  });
+  
+  function showResult(type, message) {
+    resultDiv.style.display = 'block';
+    resultDiv.className = 'mt-2 alert alert-' + (type === 'success' ? 'success' : 'danger');
+    resultDiv.innerHTML = '<i class="fas fa-' + (type === 'success' ? 'check-circle' : 'exclamation-circle') + '"></i> ' + message;
+  }
+})();
+</script>
 {% endblock %}
