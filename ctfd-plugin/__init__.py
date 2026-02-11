@@ -1,22 +1,49 @@
 """
 CTFd plugin for Kubernetes container challenges.
 Bridges CTFd (control plane) with the on‑prem Node.js orchestrator (data plane).
+
+Provides two challenge types:
+- container: Static value container challenges
+- container-dynamic: Dynamic value container challenges (value decreases with solves)
 """
 from __future__ import annotations
 
+import math
 import requests
-from flask import redirect, render_template, request, url_for
-from CTFd.models import Challenges, Configs, Flags, db
+from flask import abort, redirect, render_template, request, url_for
+from sqlalchemy import inspect
+from CTFd.models import Challenges, Configs, Flags, Solves, db
 from CTFd.plugins import register_plugin_assets_directory
 from CTFd.plugins.challenges import BaseChallenge, CHALLENGE_CLASSES
 from CTFd.utils import get_config
 from CTFd.utils.decorators import admins_only, authed_only
 from CTFd.utils.user import get_current_user
 
-from .models import ContainerChallenge
+from .models import ContainerChallenge, ContainerDynamicChallenge
+
+# Column names allowed when constructing/updating challenges
+# Note: Dynamic challenge uses prefixed column names (container_initial, container_decay, etc.)
+# but we map them via properties (initial, decay, etc.) so both work
+_CONTAINER_CHALLENGE_COLUMNS = frozenset(
+    c.key for c in inspect(ContainerChallenge).mapper.columns
+)
+_CONTAINER_DYNAMIC_CHALLENGE_COLUMNS = frozenset(
+    c.key for c in inspect(ContainerDynamicChallenge).mapper.columns
+)
+
+
+def _to_int(val, default=None):
+    """Coerce value to int for form/JSON; return default if empty or invalid."""
+    if val is None or val == "":
+        return default
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
 
 # -----------------------------------------------------------------------------
-# Challenge type
+# Static Container Challenge Type
 # -----------------------------------------------------------------------------
 
 
@@ -37,14 +64,37 @@ class ContainerChallengeClass(BaseChallenge):
 
     @classmethod
     def create(cls, request):
-        data = request.form or request.get_json() or {}
+        data = request.form or request.get_json()
         data = dict(data)
+        
+        # Merge ctfcli-style extra (e.g. image, port) into top-level
         extra = data.pop("extra", None) or {}
-        data.update(extra)
+        if isinstance(extra, dict):
+            data.update(extra)
+        
+        # Set challenge type
         data["type"] = "container"
+        
+        # Base challenge fields expected by CTFd
+        data.setdefault("state", "visible")
+        data.setdefault("logic", "any")
+        
+        # Coerce numeric fields (form sends strings)
+        if "value" in data:
+            data["value"] = _to_int(data["value"])
+        if "port" in data:
+            data["port"] = _to_int(data["port"], default=80)
+        if "timeout" in data:
+            data["timeout"] = _to_int(data["timeout"], default=3600)
+        
+        # Clean up image
+        if "image" in data:
+            data["image"] = (data.get("image") or "").strip()
+
         challenge = cls.challenge_model(**data)
         db.session.add(challenge)
         db.session.commit()
+        
         return challenge
 
     @classmethod
@@ -52,6 +102,7 @@ class ContainerChallengeClass(BaseChallenge):
         row = ContainerChallenge.query.filter_by(id=challenge.id).first()
         if not row:
             row = challenge
+
         data = {
             "id": challenge.id,
             "name": challenge.name,
@@ -60,6 +111,7 @@ class ContainerChallengeClass(BaseChallenge):
             "connection_info": challenge.connection_info,
             "category": challenge.category,
             "state": challenge.state,
+            "logic": getattr(challenge, "logic", "any"),
             "max_attempts": challenge.max_attempts,
             "type": challenge.type,
             "type_data": {
@@ -82,17 +134,31 @@ class ContainerChallengeClass(BaseChallenge):
         data = request.form or request.get_json() or {}
         data = dict(data)
         extra = data.pop("extra", None) or {}
-        data.update(extra)
+        if isinstance(extra, dict):
+            data.update(extra)
 
         container = ContainerChallenge.query.filter_by(id=challenge.id).first()
         if not container:
             return challenge
 
-        for k in ("image", "port", "command", "connection_type", "cpu_limit", "memory_limit", "timeout"):
+        container_keys = (
+            "image", "port", "command", "connection_type", "cpu_limit", "memory_limit", "timeout",
+        )
+        if "image" in data and (data.get("image") or "").strip():
+            container.image = (data["image"] or "").strip()
+        for k in ("command", "connection_type", "cpu_limit", "memory_limit"):
             if k in data:
                 setattr(container, k, data[k])
+        if "port" in data:
+            container.port = _to_int(data["port"], default=80)
+        if "timeout" in data:
+            container.timeout = _to_int(data["timeout"], default=3600)
+
+        # Only update base challenge attributes that are actual columns (avoid flags/tags/etc.)
         for k, v in data.items():
-            if hasattr(challenge, k) and k not in ("image", "port", "command", "connection_type", "cpu_limit", "memory_limit", "timeout"):
+            if k not in container_keys and k in _CONTAINER_CHALLENGE_COLUMNS and k != "id":
+                if k in ("value", "max_attempts"):
+                    v = _to_int(v)
                 setattr(challenge, k, v)
         db.session.commit()
         return challenge
@@ -113,6 +179,237 @@ class ContainerChallengeClass(BaseChallenge):
         ContainerChallenge.query.filter_by(id=challenge.id).delete()
         Challenges.query.filter_by(id=challenge.id).delete()
         db.session.commit()
+
+
+# -----------------------------------------------------------------------------
+# Dynamic Container Challenge Type
+# -----------------------------------------------------------------------------
+
+
+class ContainerDynamicChallengeClass(BaseChallenge):
+    id = "container-dynamic"
+    name = "container-dynamic"
+    templates = {
+        "create": "/plugins/k8s-challenges/assets/create-dynamic.html",
+        "update": "/plugins/k8s-challenges/assets/update-dynamic.html",
+        "view": "/plugins/k8s-challenges/assets/view-dynamic.html",
+    }
+    scripts = {
+        "create": "/plugins/k8s-challenges/assets/create-dynamic.js",
+        "update": "/plugins/k8s-challenges/assets/update-dynamic.js",
+        "view": "/plugins/k8s-challenges/assets/view-dynamic.js",
+    }
+    challenge_model = ContainerDynamicChallenge
+
+    @classmethod
+    def calculate_value(cls, challenge):
+        """Calculate the current value based on solve count and decay function."""
+        row = ContainerDynamicChallenge.query.filter_by(id=challenge.id).first()
+        if not row:
+            return challenge
+
+        solve_count = Solves.query.filter_by(challenge_id=challenge.id).count()
+        initial = row.initial_value
+        minimum = row.minimum_value
+        decay = max(1, int(row.decay))
+        function = row.decay_function or "linear"
+
+        if function == "logarithmic":
+            # Logarithmic decay: (((Minimum - Initial) / (Decay²)) × (SolveCount²)) + Initial
+            v = (((minimum - initial) / (decay * decay)) * (solve_count * solve_count)) + initial
+            value = max(int(math.ceil(v)), minimum)
+        else:
+            # Linear decay: Initial - (Decay × SolveCount)
+            v = initial - (decay * solve_count)
+            value = max(int(v), minimum)
+
+        challenge.value = value
+        db.session.commit()
+        return challenge
+
+    @classmethod
+    def create(cls, request):
+        data = request.form or request.get_json()
+        data = dict(data)
+        
+        # Merge ctfcli-style extra (e.g. image, port) into top-level
+        extra = data.pop("extra", None) or {}
+        if isinstance(extra, dict):
+            data.update(extra)
+        
+        # Set challenge type
+        data["type"] = "container-dynamic"
+        
+        # Base challenge fields expected by CTFd
+        data.setdefault("state", "visible")
+        data.setdefault("logic", "any")
+        
+        # Coerce numeric fields (form sends strings)
+        if "initial_value" in data:
+            data["initial_value"] = _to_int(data["initial_value"])
+        elif "initial" in data:
+            data["initial_value"] = _to_int(data["initial"])
+        
+        if "decay" in data:
+            data["decay"] = _to_int(data["decay"])
+        
+        if "minimum_value" in data:
+            data["minimum_value"] = _to_int(data["minimum_value"])
+        elif "minimum" in data:
+            data["minimum_value"] = _to_int(data["minimum"])
+        
+        if "decay_function" in data and data["decay_function"] not in ("linear", "logarithmic"):
+            data["decay_function"] = "linear"
+        
+        if "port" in data:
+            data["port"] = _to_int(data["port"], default=80)
+        if "timeout" in data:
+            data["timeout"] = _to_int(data["timeout"], default=3600)
+        
+        # Clean up image
+        if "image" in data:
+            data["image"] = (data.get("image") or "").strip()
+
+        challenge = cls.challenge_model(**data)
+        db.session.add(challenge)
+        db.session.commit()
+        
+        return cls.calculate_value(challenge)
+
+    @classmethod
+    def read(cls, challenge):
+        row = ContainerDynamicChallenge.query.filter_by(id=challenge.id).first()
+        if not row:
+            row = challenge
+
+        # Calculate current value based on solves
+        solve_count = Solves.query.filter_by(challenge_id=challenge.id).count()
+        initial = row.initial_value
+        minimum = row.minimum_value
+        decay = max(1, int(row.decay))
+        function = row.decay_function or "linear"
+
+        if function == "logarithmic":
+            v = (((minimum - initial) / (decay * decay)) * (solve_count * solve_count)) + initial
+            value = max(int(math.ceil(v)), minimum)
+        else:
+            v = initial - (decay * solve_count)
+            value = max(int(v), minimum)
+
+        data = {
+            "id": challenge.id,
+            "name": challenge.name,
+            "value": value,
+            "description": challenge.description,
+            "connection_info": challenge.connection_info,
+            "category": challenge.category,
+            "state": challenge.state,
+            "logic": getattr(challenge, "logic", "any"),
+            "max_attempts": challenge.max_attempts,
+            "type": challenge.type,
+            "type_data": {
+                "id": cls.id,
+                "name": cls.name,
+                "templates": cls.templates,
+                "scripts": cls.scripts,
+            },
+            "image": getattr(row, "image", None),
+            "port": getattr(row, "port", 80),
+            "connection_type": getattr(row, "connection_type", "http"),
+            "memory_limit": getattr(row, "memory_limit", "256Mi"),
+            "cpu_limit": getattr(row, "cpu_limit"),
+            "timeout": getattr(row, "timeout", 3600),
+            "initial_value": initial,
+            "decay_function": function,
+            "decay": row.decay,
+            "minimum_value": minimum,
+        }
+        return data
+
+    @classmethod
+    def update(cls, challenge, request):
+        from CTFd.exceptions.challenges import ChallengeUpdateException
+        
+        data = request.form or request.get_json() or {}
+        data = dict(data)
+        extra = data.pop("extra", None) or {}
+        if isinstance(extra, dict):
+            data.update(extra)
+
+        container = ContainerDynamicChallenge.query.filter_by(id=challenge.id).first()
+        if not container:
+            return challenge
+
+        container_keys = (
+            "image", "port", "command", "connection_type", "cpu_limit", "memory_limit", "timeout",
+            "initial_value", "decay_function", "decay", "minimum_value",
+        )
+        
+        # Update container-specific fields
+        if "image" in data and (data.get("image") or "").strip():
+            container.image = (data["image"] or "").strip()
+        for k in ("command", "connection_type", "cpu_limit", "memory_limit"):
+            if k in data:
+                setattr(container, k, data[k])
+        if "port" in data:
+            container.port = _to_int(data["port"], default=80)
+        if "timeout" in data:
+            container.timeout = _to_int(data["timeout"], default=3600)
+
+        # Update dynamic value fields
+        for k in ("initial_value", "decay", "minimum_value"):
+            if k in data:
+                try:
+                    value = _to_int(data.get(k))
+                    if value is not None:
+                        setattr(container, k, value)
+                except (ValueError, TypeError):
+                    raise ChallengeUpdateException(f"Invalid input for '{k}'")
+        
+        if "decay_function" in data and data["decay_function"] in ("linear", "logarithmic"):
+            container.decay_function = data["decay_function"]
+
+        # Update base challenge value to initial_value if changed
+        if "initial_value" in data:
+            challenge.value = container.initial_value
+
+        # Only update base challenge attributes that are actual columns
+        for k, v in data.items():
+            if k not in container_keys and k in _CONTAINER_DYNAMIC_CHALLENGE_COLUMNS and k != "id":
+                if k in ("value", "max_attempts"):
+                    v = _to_int(v)
+                setattr(challenge, k, v)
+        
+        db.session.commit()
+        return cls.calculate_value(challenge)
+
+    @classmethod
+    def delete(cls, challenge):
+        from CTFd.models import ChallengeFiles, Fails, Hints, Solves, Tags
+        from CTFd.utils.uploads import delete_file
+
+        Fails.query.filter_by(challenge_id=challenge.id).delete()
+        Solves.query.filter_by(challenge_id=challenge.id).delete()
+        Flags.query.filter_by(challenge_id=challenge.id).delete()
+        for f in ChallengeFiles.query.filter_by(challenge_id=challenge.id).all():
+            delete_file(f.id)
+        ChallengeFiles.query.filter_by(challenge_id=challenge.id).delete()
+        Tags.query.filter_by(challenge_id=challenge.id).delete()
+        Hints.query.filter_by(challenge_id=challenge.id).delete()
+        ContainerDynamicChallenge.query.filter_by(id=challenge.id).delete()
+        Challenges.query.filter_by(id=challenge.id).delete()
+        db.session.commit()
+
+    @classmethod
+    def solve(cls, user, team, challenge, request):
+        """Override solve to recalculate value after a solve."""
+        super().solve(user, team, challenge, request)
+        cls.calculate_value(challenge)
+
+
+# -----------------------------------------------------------------------------
+# Helper functions for orchestrator communication
+# -----------------------------------------------------------------------------
 
 
 def _get_config(key, default=""):
@@ -148,6 +445,17 @@ def _account_id():
     return str(user.id)
 
 
+def _get_challenge_data(challenge_id):
+    """Get challenge data regardless of type (container or container-dynamic)."""
+    # Try static first
+    row = ContainerChallenge.query.filter_by(id=challenge_id).first()
+    if row:
+        return row
+    # Try dynamic
+    row = ContainerDynamicChallenge.query.filter_by(id=challenge_id).first()
+    return row
+
+
 def _container_api(app):
     @app.route("/api/v1/container/start", methods=["POST"])
     @authed_only
@@ -159,9 +467,11 @@ def _container_api(app):
         cid = data.get("challenge_id")
         if not cid:
             return {"success": False, "error": "challenge_id required"}, 400
-        row = ContainerChallenge.query.filter_by(id=int(cid)).first()
-        if not row or row.type != "container":
+        
+        row = _get_challenge_data(int(cid))
+        if not row or row.type not in ("container", "container-dynamic"):
             return {"success": False, "error": "Challenge not found or not a container challenge"}, 404
+        
         flag = Flags.query.filter_by(challenge_id=row.id).first()
         flag_val = (flag.content or "") if flag else ""
         body = {
@@ -230,7 +540,7 @@ def _container_api(app):
 
 def _admin_routes(app):
     from flask import Blueprint
-    from flask_wtf.csrf import generate_csrf
+    from CTFd.utils.security.csrf import validate_nonce
 
     bp = Blueprint("k8s_config", __name__, template_folder="templates")
 
@@ -238,6 +548,11 @@ def _admin_routes(app):
     @admins_only
     def _admin():
         if request.method == "POST":
+            # Validate CSRF nonce
+            nonce = request.form.get("nonce")
+            if not validate_nonce(nonce):
+                return abort(403)
+            
             u = (request.form.get("orchestrator_url") or "").strip()
             k = (request.form.get("api_key") or "").strip()
             for name, v in (("k8s_orchestrator_url", u), ("k8s_api_key", k)):
@@ -254,7 +569,6 @@ def _admin_routes(app):
             "k8s_admin_config.html",
             orchestrator_url=u,
             api_key=k,
-            csrf_token=generate_csrf(),
         )
 
     app.register_blueprint(bp)
@@ -263,6 +577,7 @@ def _admin_routes(app):
 def load(app):
     app.db.create_all()
     CHALLENGE_CLASSES["container"] = ContainerChallengeClass
+    CHALLENGE_CLASSES["container-dynamic"] = ContainerDynamicChallengeClass
     register_plugin_assets_directory(app, base_path="/plugins/k8s-challenges/assets/")
     _container_api(app)
     _admin_routes(app)

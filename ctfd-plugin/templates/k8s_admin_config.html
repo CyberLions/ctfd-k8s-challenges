@@ -1,20 +1,104 @@
 {% extends "admin/base.html" %}
 
 {% block content %}
-<div class="section">
-  <h3>K8s Container Challenges</h3>
-  <p>Configure the on‑prem Node.js orchestrator. Set the API key to match <code>X-API-KEY</code> on the orchestrator.</p>
-  <form method="POST" action="{{ request.script_root or '' }}/admin/plugins/k8s-challenges">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"/>
-    <div class="form-group">
-      <label for="orchestrator_url">Orchestrator URL</label>
-      <input id="orchestrator_url" type="url" name="orchestrator_url" class="form-control" placeholder="https://api.sillyctf.psuccso.org" value="{{ orchestrator_url }}">
+<div class="jumbotron">
+  <div class="container">
+    <h1>K8s Container Challenges</h1>
+  </div>
+</div>
+<div class="container">
+  <div class="row">
+    <div class="col-md-12">
+      <p class="text-muted">
+        Configure the connection to your on-premises Kubernetes orchestrator. 
+        The orchestrator handles container deployment and lifecycle management for challenge instances.
+      </p>
+      <hr>
     </div>
-    <div class="form-group">
-      <label for="api_key">API Key</label>
-      <input id="api_key" type="password" name="api_key" class="form-control" placeholder="(leave blank to keep existing)" value="{{ api_key }}" autocomplete="off">
+  </div>
+  
+  <div class="row">
+    <div class="col-md-8">
+      <form method="POST" action="{{ request.script_root or '' }}/admin/plugins/k8s-challenges">
+        <input type="hidden" name="nonce" value="{{ Session.nonce }}"/>
+        
+        <div class="form-group">
+          <label for="orchestrator_url">
+            Orchestrator URL
+            <small class="form-text text-muted">
+              Base URL of your k8s-client orchestrator API (e.g., https://api.example.org)
+            </small>
+          </label>
+          <input 
+            id="orchestrator_url" 
+            type="url" 
+            name="orchestrator_url" 
+            class="form-control" 
+            placeholder="https://api.sillyctf.psuccso.org" 
+            value="{{ orchestrator_url }}"
+            required
+          >
+        </div>
+        
+        <div class="form-group">
+          <label for="api_key">
+            API Key
+            <small class="form-text text-muted">
+              Shared secret for authenticating with the orchestrator. Must match the <code>X_API_KEY</code> environment variable on your orchestrator.
+            </small>
+          </label>
+          <input 
+            id="api_key" 
+            type="password" 
+            name="api_key" 
+            class="form-control" 
+            placeholder="Leave blank to keep existing key" 
+            value="{{ api_key }}" 
+            autocomplete="off"
+          >
+        </div>
+        
+        <hr>
+        
+        <div class="form-group">
+          <button type="submit" class="btn btn-primary">
+            <i class="fas fa-save"></i> Save Settings
+          </button>
+          <a href="{{ request.script_root or '' }}/admin/challenges/new" class="btn btn-success">
+            <i class="fas fa-plus"></i> Create Challenge
+          </a>
+        </div>
+      </form>
     </div>
-    <button type="submit" class="btn btn-primary">Save</button>
-  </form>
+    
+    <div class="col-md-4">
+      <div class="card">
+        <div class="card-header">
+          <i class="fas fa-info-circle"></i> Setup Guide
+        </div>
+        <div class="card-body">
+          <h6 class="card-title">Requirements</h6>
+          <ul class="small">
+            <li>k8s-client orchestrator running</li>
+            <li>Kubernetes cluster configured</li>
+            <li>Network connectivity from CTFd</li>
+          </ul>
+          
+          <h6 class="card-title mt-3">Challenge Types</h6>
+          <dl class="small">
+            <dt>Container</dt>
+            <dd>Static point value challenges</dd>
+            <dt>Container-Dynamic</dt>
+            <dd>Points decrease as teams solve</dd>
+          </dl>
+          
+          <h6 class="card-title mt-3">Documentation</h6>
+          <p class="small">
+            See the <code>k8s-client/README.md</code> for orchestrator setup instructions.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}

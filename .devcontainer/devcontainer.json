@@ -6,12 +6,6 @@
   "shutdownAction": "stopCompose",
   "remoteUser": "root",
   "overrideCommand": true,
-  "forwardPorts": [3000, 3011, 3012],
-  "portsAttributes": {
-    "3000": { "label": "CTFd" },
-    "3011": { "label": "Node.js" },
-    "3012": { "label": "phpMyAdmin" }
-  },
   "mounts": [
     "source=${localWorkspaceFolder},target=/workspace,type=bind",
     "source=${localEnv:HOME}${localEnv:USERPROFILE}/.gitconfig,target=/root/.gitconfig,type=bind"

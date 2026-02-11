@@ -1,27 +1,72 @@
+{% extends "admin/challenges/create.html" %}
+
+{% block value %}
+{{ super() }}
+
 <div class="form-group">
-  <label>Docker Image</label>
+  <label>
+    Docker Image:<br>
+    <small class="form-text text-muted">
+      Container image to deploy (e.g., registry.example.com/challenges/web:v1)
+    </small>
+  </label>
   <input type="text" class="form-control" name="image" placeholder="registry.example.com/challenges/web:v1" required>
 </div>
+
 <div class="form-group">
-  <label>Port</label>
+  <label>
+    Port:<br>
+    <small class="form-text text-muted">
+      Internal container port
+    </small>
+  </label>
   <input type="number" class="form-control" name="port" value="80" min="1" max="65535">
 </div>
+
 <div class="form-group">
-  <label>Connection Type</label>
+  <label>
+    Connection Type:<br>
+    <small class="form-text text-muted">
+      How users will connect to the container
+    </small>
+  </label>
   <select class="form-control" name="connection_type">
     <option value="http">HTTP / Web</option>
     <option value="tcp">TCP</option>
   </select>
 </div>
+
 <div class="form-group">
-  <label>Memory Limit</label>
+  <label>
+    Memory Limit:<br>
+    <small class="form-text text-muted">
+      Memory limit for the container (e.g., 256Mi, 512Mi, 1Gi)
+    </small>
+  </label>
   <input type="text" class="form-control" name="memory_limit" value="256Mi" placeholder="256Mi">
 </div>
+
 <div class="form-group">
-  <label>CPU Limit (optional)</label>
+  <label>
+    CPU Limit (optional):<br>
+    <small class="form-text text-muted">
+      CPU limit for the container (e.g., 500m, 1)
+    </small>
+  </label>
   <input type="text" class="form-control" name="cpu_limit" placeholder="500m">
 </div>
+
 <div class="form-group">
-  <label>Timeout (seconds)</label>
+  <label>
+    Timeout (seconds):<br>
+    <small class="form-text text-muted">
+      How long instances will run before auto-termination
+    </small>
+  </label>
   <input type="number" class="form-control" name="timeout" value="3600" min="60" placeholder="3600">
 </div>
+{% endblock %}
+
+{% block type %}
+<input type="hidden" value="container" name="type" id="chaltype">
+{% endblock %}

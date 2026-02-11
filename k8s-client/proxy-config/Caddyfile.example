@@ -1,0 +1,11 @@
+# Snippet for Caddy. Your existing Caddy proxy for the CTFd Orchestrator URL
+# must forward to the internal k8s-client and set Host to that target.
+
+# Replace with your internal orchestrator (e.g. rack-proxy.pritunl or k8s-client:3000).
+# CTFd Orchestrator URL = https://your-orchestrator.example.com
+your-orchestrator.example.com {
+    reverse_proxy http://rack-proxy.pritunl:3000 {
+        # Host must match the upstream host:port so the backend sees the real target
+        header_up Host rack-proxy.pritunl:3000
+    }
+}

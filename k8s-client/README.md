@@ -17,6 +17,8 @@ For local dev with Minikube/Kind:
 
 See `.env.example` for all options.
 
+**On‑prem only:** k8s-client is not exposed to the internet. It only needs access to the Kubernetes API (in‑cluster when `KUBERNETES_SERVICE_HOST` is set, or kubeconfig). CTFd (cloud) talks to the orchestrator via your **existing proxy**: the proxy must forward to the internal k8s-client and set the `Host` header to that target. See `proxy-config/`.
+
 ## API (requires `X-API-KEY` when `X_API_KEY` is set)
 
 - `POST /api/v1/deploy` – create deployment + service + (for web) ingress

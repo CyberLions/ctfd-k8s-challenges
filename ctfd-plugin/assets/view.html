@@ -1,19 +1,38 @@
-<div id="container-challenge-ctl" class="form-group" data-challenge-id="{{ id }}">
+{% extends "challenge.html" %}
+
+{% block input %}
+<div id="container-challenge-ctl" class="mb-3" data-challenge-id="{{ challenge.id }}">
   <div id="container-idle">
-    <button type="button" class="btn btn-primary" id="container-start-btn">Start Instance</button>
+    <button type="button" class="btn btn-primary w-100" id="container-start-btn">
+      <i class="fas fa-play"></i> Start Instance
+    </button>
   </div>
   <div id="container-loading" style="display:none">
-    <button type="button" class="btn btn-primary" disabled><span class="spinner-border spinner-border-sm"></span> Starting…</button>
+    <button type="button" class="btn btn-primary w-100" disabled>
+      <span class="spinner-border spinner-border-sm"></span> Starting…
+    </button>
   </div>
   <div id="container-active" style="display:none">
-    <p><strong>Connection:</strong> <a id="container-connection" href="#" target="_blank" rel="noopener"></a><span id="container-nc" class="font-monospace"></span></p>
-    <p><strong>Expires in:</strong> <span id="container-timer">--:--:--</span></p>
-    <button type="button" class="btn btn-outline-secondary btn-sm" id="container-stop-btn">Stop</button>
-    <button type="button" class="btn btn-outline-secondary btn-sm" id="container-renew-btn">Reset</button>
+    <div class="alert alert-info mb-3">
+      <p class="mb-2">
+        <strong>Connection:</strong>
+        <a id="container-connection" href="#" target="_blank" rel="noopener"></a>
+        <span id="container-nc" class="font-monospace"></span>
+      </p>
+      <p class="mb-2">
+        <strong>Expires in:</strong> <span id="container-timer" class="badge bg-warning text-dark">--:--:--</span>
+      </p>
+      <div class="btn-group btn-group-sm" role="group">
+        <button type="button" class="btn btn-outline-secondary" id="container-stop-btn">
+          <i class="fas fa-stop"></i> Stop
+        </button>
+        <button type="button" class="btn btn-outline-secondary" id="container-renew-btn">
+          <i class="fas fa-redo"></i> Reset
+        </button>
+      </div>
+    </div>
   </div>
 </div>
-<div class="form-group">
-  <label for="challenge-input">Flag</label>
-  <input type="text" class="form-control" id="challenge-input" name="submission" placeholder="CTF{…}">
-</div>
-<input type="hidden" id="challenge-id" value="{{ id }}">
+
+{{ super() }}
+{% endblock %}

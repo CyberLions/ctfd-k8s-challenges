@@ -1,0 +1,20 @@
+# Example for ctfcli: dynamic container challenge (value decreases with solves).
+name: "Dynamic Web"
+author: "CyberLions"
+category: "Web"
+description: "Can you hack this? Points decrease as more teams solve it."
+type: "container-dynamic"
+
+extra:
+  image: "registry.cyberlions.com/web/dynamic:latest"
+  port: 8080
+  connection_type: "http"
+  memory_limit: "512Mi"
+  timeout: 3600
+  initial_value: 500
+  decay_function: "logarithmic"   # or "linear"
+  decay: 20                      # linear: points per solve; logarithmic: solves before minimum
+  minimum_value: 50
+
+flags:
+  - "CTF{sample}"
