@@ -1,5 +1,6 @@
 import { renewBody } from "../schemas.js";
 import { getK8sClients, LABELS, resourceName, getNamespace } from "../lib/k8s.js";
+import { ensureConnectionInfo } from "../lib/connectionInfo.js";
 
 const NAMESPACE = getNamespace();
 
@@ -58,6 +59,8 @@ export async function renew(fastify, opts) {
                 "New Unix timestamp (seconds since epoch) when the instance is scheduled to be reaped.",
               examples: [1739283000],
             },
+            success: { type: "boolean" },
+            connection_info: { type: "string" },
           },
         },
         400: {
@@ -194,13 +197,22 @@ export async function renew(fastify, opts) {
       }
     }
 
+    const rawAnnotation = deployment.metadata?.annotations?.["ctfd-orchestrator/connection-info"] || "";
+    const connectionInfo = await ensureConnectionInfo(team_id, challenge_id, rawAnnotation);
+
     console.log("Renew successful:", {
       team_id,
       challenge_id,
       new_expires_at: newExpiresAt,
       restart_requested: restart,
+      connection_info: connectionInfo,
     });
 
-    return reply.send({ status: "renewed", expires_at: newExpiresAt, success: true });
+    return reply.send({
+      status: "renewed",
+      expires_at: newExpiresAt,
+      success: true,
+      connection_info: connectionInfo,
+    });
   });
 }

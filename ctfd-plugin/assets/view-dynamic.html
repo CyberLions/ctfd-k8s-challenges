@@ -1,7 +1,9 @@
 {% extends "challenge.html" %}
 
-{% block input %}
-<div id="container-challenge-ctl" class="mb-3" data-challenge-id="{{ challenge.id }}">
+{% block description %}
+{{ super() }}
+
+<div id="container-challenge-ctl" class="mt-3 mb-4" data-challenge-id="{{ challenge.id }}">
   <div id="container-idle">
     <button type="button" class="btn btn-primary w-100" id="container-start-btn" onclick="window.k8sStartContainer(this)">
       <i class="fas fa-play"></i> Start Instance
@@ -13,12 +15,21 @@
     </button>
   </div>
   <div id="container-active" style="display:none">
-    <div class="alert alert-info mb-3">
-      <p class="mb-2">
-        <strong>Connection:</strong>
-        <a id="container-connection" href="#" target="_blank" rel="noopener"></a>
-        <span id="container-nc" class="font-monospace"></span>
-      </p>
+    <div class="alert alert-info mb-0">
+      <div id="container-web-info" style="display:none">
+        <p class="mb-2">
+          <strong>Connection:</strong>
+          <a id="container-connection" href="#" target="_blank" rel="noopener"></a>
+        </p>
+      </div>
+      <div id="container-tcp-info" style="display:none">
+        <p class="mb-2">
+          <strong>Host:</strong> <code id="container-tcp-host"></code>
+        </p>
+        <p class="mb-2">
+          <strong>Port:</strong> <code id="container-tcp-port"></code>
+        </p>
+      </div>
       <p class="mb-2">
         <strong>Expires in:</strong> <span id="container-timer" class="badge bg-warning text-dark">--:--:--</span>
       </p>
@@ -33,6 +44,4 @@
     </div>
   </div>
 </div>
-
-{{ super() }}
 {% endblock %}

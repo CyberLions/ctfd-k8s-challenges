@@ -9,6 +9,7 @@ import { baseLabels, resourceName, getNamespace, getRootDomain } from "./k8s.js"
  * @param {number} opts.expiresAt
  * @param {string} [opts.memoryLimit]
  * @param {string} [opts.cpuLimit]
+ * @param {string} [opts.imagePullSecret]
  * @param {Record<string,string>} [opts.envVars]
  * @param {"web"|"tcp"} opts.type
  */
@@ -54,6 +55,9 @@ export function buildDeployment(opts) {
               resources: Object.keys(resources).length ? resources : undefined,
             },
           ],
+          ...(opts.imagePullSecret && {
+            imagePullSecrets: [{ name: opts.imagePullSecret }],
+          }),
           restartPolicy: "Always",
         },
       },
@@ -96,12 +100,16 @@ export function buildService(opts) {
  * @param {string} opts.challengeId
  * @param {number} opts.port
  * @param {number} [opts.expiresAt]
+ * @param {string} [opts.prefix]
  */
 export function buildIngress(opts) {
   const name = resourceName(opts.teamId, opts.challengeId);
   const ns = getNamespace();
   const root = getRootDomain();
-  const host = `${opts.teamId}-${opts.challengeId}.${root}`.toLowerCase().replace(/[^a-z0-9.-]/g, "-");
+  const parts = opts.prefix
+    ? [opts.prefix, opts.teamId, opts.challengeId]
+    : [opts.teamId, opts.challengeId];
+  const host = `${parts.join("-")}.${root}`.toLowerCase().replace(/[^a-z0-9.-]/g, "-");
   const labels = baseLabels(opts.teamId, opts.challengeId, String(opts.expiresAt || 0));
 
   return {
@@ -135,7 +143,7 @@ export function buildIngress(opts) {
           },
         },
       ],
-      ...(process.env.TLS_ENABLED !== "false" && {
+      ...(opts.tlsEnabled && {
         tls: [{ hosts: [host], secretName: null }],
       }),
     },

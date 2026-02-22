@@ -6,6 +6,7 @@ import { deploy } from "./routes/deploy.js";
 import { status } from "./routes/status.js";
 import { terminate } from "./routes/terminate.js";
 import { renew } from "./routes/renew.js";
+import { statusAll } from "./routes/statusAll.js";
 import { startReaper } from "./lib/reaper.js";
 
 const API_KEY = process.env.X_API_KEY || process.env.API_KEY || "";
@@ -385,6 +386,7 @@ async function build() {
     scoped.register(status, { prefix: "/api/v1" });
     scoped.register(terminate, { prefix: "/api/v1" });
     scoped.register(renew, { prefix: "/api/v1" });
+    scoped.register(statusAll, { prefix: "/api/v1" });
   });
 
   fastify.get("/health", async () => ({ ok: true }));

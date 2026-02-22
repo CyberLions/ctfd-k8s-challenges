@@ -13,7 +13,7 @@ import requests
 from flask import redirect, render_template, request, url_for
 from sqlalchemy import inspect
 from CTFd.models import Challenges, Configs, Flags, Solves, db
-from CTFd.plugins import register_plugin_assets_directory
+from CTFd.plugins import register_plugin_assets_directory, register_plugin_script
 from CTFd.plugins.challenges import BaseChallenge, CHALLENGE_CLASSES
 from CTFd.utils import get_config
 from CTFd.utils.decorators import admins_only, authed_only
@@ -426,8 +426,20 @@ def _orchestrator_request(method, path, json=None, timeout=30):
     if not base:
         return None, {"error": "Orchestrator URL not configured"}
     key = _get_config("k8s_api_key", "")
-    url = f"{base}/api/v1{path}"
-    headers = {}
+    proxy_base = _get_config("k8s_proxy_service_url", "").rstrip("/")
+
+    # When a proxy service URL is configured, route traffic through it
+    # but set the Host header to the orchestrator URL's hostname so the
+    # upstream ingress/reverse-proxy can route correctly.
+    if proxy_base:
+        from urllib.parse import urlparse
+        parsed = urlparse(base)
+        url = f"{proxy_base}/api/v1{path}"
+        headers = {"Host": parsed.hostname}
+    else:
+        url = f"{base}/api/v1{path}"
+        headers = {}
+
     if key:
         headers["X-API-KEY"] = key
     try:
@@ -460,6 +472,36 @@ def _get_challenge_data(challenge_id):
     return row
 
 
+def _fix_connection_info(data):
+    """Rewrite connection_info to reflect current admin settings.
+
+    - TCP challenges: replaces hostname with k8s_tcp_hostname if configured.
+    - Web challenges: enforces correct http/https based on tls_enabled and https_urls.
+    """
+    if not isinstance(data, dict):
+        return data
+    conn = data.get("connection_info", "")
+    if not conn:
+        return data
+
+    # Fix TCP hostname
+    if conn.startswith("nc "):
+        tcp_hostname = _get_config("k8s_tcp_hostname", "").strip()
+        if tcp_hostname:
+            parts = conn.split(" ", 2)  # ["nc", "old_host", "port"]
+            if len(parts) == 3:
+                data["connection_info"] = f"nc {tcp_hostname} {parts[2]}"
+    # Fix web protocol
+    elif conn.startswith("http://") or conn.startswith("https://"):
+        want_https = bool(_get_config("k8s_tls_enabled", "") or _get_config("k8s_https_urls", ""))
+        if want_https and conn.startswith("http://"):
+            data["connection_info"] = "https://" + conn[7:]
+        elif not want_https and conn.startswith("https://"):
+            data["connection_info"] = "http://" + conn[8:]
+
+    return data
+
+
 def _container_api(app):
     @app.route("/api/v1/container/start", methods=["POST"])
     @authed_only
@@ -489,15 +531,35 @@ def _container_api(app):
             "memory_limit": row.memory_limit or "256Mi",
             "env_vars": {"FLAG": flag_val},
         }
-        
-        # Add cpu_limit only if it's set
+
+        # Add optional fields only when set
         if row.cpu_limit:
             body["cpu_limit"] = row.cpu_limit
-        
+        if row.prefix:
+            body["prefix"] = row.prefix
+
+        pull_secret = _get_config("k8s_registry_pull_secret", "").strip()
+        if pull_secret:
+            body["image_pull_secret"] = pull_secret
+
+        tcp_hostname = _get_config("k8s_tcp_hostname", "").strip()
+        if tcp_hostname:
+            body["tcp_hostname"] = tcp_hostname
+
+        if _get_config("k8s_tls_enabled", ""):
+            body["tls_enabled"] = True
+        if _get_config("k8s_https_urls", ""):
+            body["https_urls"] = True
+
         code, out = _orchestrator_request("POST", "/deploy", json=body)
         if code in (200, 201):
-            return {"success": True, "data": out}
-        return {"success": False, "error": out.get("error", "Orchestrator error")}, max(400, code)
+            return {"success": True, "data": _fix_connection_info(out)}
+        if code == 409:
+            # Instance already running for this team — return its current info
+            scode, sout = _orchestrator_request("GET", f"/status?team_id={aid}&challenge_id={str(row.id)}")
+            if scode == 200:
+                return {"success": True, "data": _fix_connection_info(sout)}
+        return {"success": False, "error": out.get("error", "Orchestrator error")}, max(400, code or 500)
 
     @app.route("/api/v1/container/status", methods=["GET"])
     @authed_only
@@ -510,8 +572,8 @@ def _container_api(app):
             return {"success": False, "error": "challenge_id required"}, 400
         code, out = _orchestrator_request("GET", f"/status?team_id={aid}&challenge_id={cid}")
         if code == 200:
-            return {"success": True, "data": out}
-        return {"success": False, "error": out.get("error", "Orchestrator error")}, max(400, code)
+            return {"success": True, "data": _fix_connection_info(out)}
+        return {"success": False, "error": out.get("error", "Orchestrator error")}, max(400, code or 500)
 
     @app.route("/api/v1/container/stop", methods=["POST"])
     @authed_only
@@ -526,7 +588,7 @@ def _container_api(app):
         code, out = _orchestrator_request("POST", "/terminate", json={"team_id": aid, "challenge_id": str(cid)})
         if code == 200:
             return {"success": True, "data": out}
-        return {"success": False, "error": out.get("error", "Orchestrator error")}, max(400, code)
+        return {"success": False, "error": out.get("error", "Orchestrator error")}, max(400, code or 500)
 
     @app.route("/api/v1/container/renew", methods=["POST"])
     @authed_only
@@ -543,8 +605,22 @@ def _container_api(app):
             body["duration"] = int(data["duration"])
         code, out = _orchestrator_request("POST", "/renew", json=body)
         if code == 200:
-            return {"success": True, "data": out}
-        return {"success": False, "error": out.get("error", "Orchestrator error")}, max(400, code)
+            return {"success": True, "data": _fix_connection_info(out)}
+        return {"success": False, "error": out.get("error", "Orchestrator error")}, max(400, code or 500)
+
+    @app.route("/api/v1/container/status/all", methods=["GET"])
+    @authed_only
+    def _status_all():
+        aid = _account_id()
+        if not aid:
+            return {"success": False, "error": "Not authenticated"}, 401
+        code, out = _orchestrator_request("GET", f"/status/all?team_id={aid}")
+        if code == 200:
+            instances = out.get("instances", {})
+            for cid_key in instances:
+                _fix_connection_info(instances[cid_key])
+            return {"success": True, "data": instances}
+        return {"success": True, "data": {}}
 
 
 def _admin_routes(app):
@@ -560,8 +636,13 @@ def _admin_routes(app):
             config_mapping = {
                 "k8s_orchestrator_url": (request.form.get("orchestrator_url") or "").strip(),
                 "k8s_api_key": (request.form.get("api_key") or "").strip(),
+                "k8s_proxy_service_url": (request.form.get("proxy_service_url") or "").strip(),
                 "k8s_domain_suffix": (request.form.get("domain_suffix") or "").strip(),
+                "k8s_tls_enabled": "1" if request.form.get("tls_enabled") else "",
+                "k8s_https_urls": "1" if request.form.get("https_urls") else "",
+                "k8s_tcp_hostname": (request.form.get("tcp_hostname") or "").strip(),
                 "k8s_tcp_port_range": (request.form.get("tcp_port_range") or "").strip(),
+                "k8s_registry_pull_secret": (request.form.get("registry_pull_secret") or "").strip(),
                 "k8s_max_containers_global": request.form.get("max_containers_global", "100"),
                 "k8s_max_containers_per_team": request.form.get("max_containers_per_team", "5"),
             }
@@ -580,8 +661,13 @@ def _admin_routes(app):
             "k8s_admin_config.html",
             orchestrator_url=_get_config("k8s_orchestrator_url", ""),
             api_key=_get_config("k8s_api_key", ""),
+            proxy_service_url=_get_config("k8s_proxy_service_url", ""),
             domain_suffix=_get_config("k8s_domain_suffix", ".sillyctf-challenges.psuccso.org"),
+            tls_enabled=bool(_get_config("k8s_tls_enabled", "")),
+            https_urls=bool(_get_config("k8s_https_urls", "")),
+            tcp_hostname=_get_config("k8s_tcp_hostname", ""),
             tcp_port_range=_get_config("k8s_tcp_port_range", "30000-32767"),
+            registry_pull_secret=_get_config("k8s_registry_pull_secret", ""),
             max_containers_global=_get_config("k8s_max_containers_global", "100"),
             max_containers_per_team=_get_config("k8s_max_containers_per_team", "5"),
         )
@@ -591,36 +677,52 @@ def _admin_routes(app):
     def _test_connection():
         """Test connection to orchestrator using provided or saved credentials."""
         from flask import jsonify
-        
+        from urllib.parse import urlparse
+
         # Get URL and API key from query params (for testing unsaved values) or from config
         orchestrator_url = (request.args.get("orchestrator_url") or "").strip()
         api_key = (request.args.get("api_key") or "").strip()
-        
+        proxy_service_url = (request.args.get("proxy_service_url") or "").strip()
+
         # Fall back to saved config if not provided
         if not orchestrator_url:
             orchestrator_url = _get_config("k8s_orchestrator_url", "").rstrip("/")
         else:
             orchestrator_url = orchestrator_url.rstrip("/")
-        
+
         if not api_key:
             api_key = _get_config("k8s_api_key", "")
-        
+
+        if not proxy_service_url:
+            proxy_service_url = _get_config("k8s_proxy_service_url", "").rstrip("/")
+        else:
+            proxy_service_url = proxy_service_url.rstrip("/")
+
         if not orchestrator_url:
             return jsonify({"success": False, "error": "Orchestrator URL not configured"}), 400
-        
+
         # Test connection by calling /health endpoint
-        url = f"{orchestrator_url}/health"
+        # Route through proxy if configured
         headers = {}
+        if proxy_service_url:
+            url = f"{proxy_service_url}/health"
+            headers["Host"] = urlparse(orchestrator_url).hostname
+        else:
+            url = f"{orchestrator_url}/health"
+
         if api_key:
             headers["X-API-KEY"] = api_key
-        
+
         try:
             r = requests.get(url, headers=headers, timeout=10)
             if r.status_code == 200:
                 response_data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+                msg = "Connection successful"
+                if proxy_service_url:
+                    msg += " (via proxy)"
                 return jsonify({
                     "success": True,
-                    "message": "Connection successful",
+                    "message": msg,
                     "status_code": r.status_code,
                     "response": response_data
                 })
@@ -646,5 +748,6 @@ def load(app):
     CHALLENGE_CLASSES["container"] = ContainerChallengeClass
     CHALLENGE_CLASSES["container-dynamic"] = ContainerDynamicChallengeClass
     register_plugin_assets_directory(app, base_path="/plugins/k8s-challenges/assets/")
+    register_plugin_script("/plugins/k8s-challenges/assets/challenges-status.js")
     _container_api(app)
     _admin_routes(app)

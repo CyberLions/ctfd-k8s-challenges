@@ -1,5 +1,6 @@
 import { statusQuery } from "../schemas.js";
 import { getK8sClients, LABELS, resourceName, getNamespace } from "../lib/k8s.js";
+import { ensureConnectionInfo } from "../lib/connectionInfo.js";
 
 const NAMESPACE = getNamespace();
 
@@ -37,6 +38,9 @@ export async function status(fastify, opts) {
                 "Computed status of the pod backing this challenge instance. Possible values: `Pending`, `Running`, `Terminated`.",
               examples: ["Running"],
             },
+            success: { type: "boolean" },
+            connection_info: { type: "string" },
+            expires_at: { type: "integer", nullable: true },
           },
         },
         400: {
@@ -115,12 +119,24 @@ export async function status(fastify, opts) {
       else podStatus = "Pending";
     }
 
+    const rawAnnotation = deployment.metadata?.annotations?.["ctfd-orchestrator/connection-info"] || "";
+    const connectionInfo = await ensureConnectionInfo(team_id, challenge_id, rawAnnotation);
+    const expiresAtLabel = deployment.metadata?.labels?.[LABELS.EXPIRES_AT] || "";
+    const expiresAt = expiresAtLabel ? parseInt(expiresAtLabel, 10) : null;
+
     console.log("Status check successful:", {
       team_id,
       challenge_id,
       status: podStatus,
+      connection_info: connectionInfo,
+      expires_at: expiresAt,
     });
 
-    return reply.send({ status: podStatus, success: true });
+    return reply.send({
+      status: podStatus,
+      success: true,
+      connection_info: connectionInfo,
+      expires_at: expiresAt,
+    });
   });
 }

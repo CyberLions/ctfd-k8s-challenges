@@ -110,6 +110,39 @@ export async function deploy(fastify, opts) {
               "Optional CPU limit for the container, expressed in Kubernetes quantity syntax (e.g. `500m`, `1`). If omitted, no explicit CPU limit is set.",
             examples: ["500m"],
           },
+          image_pull_secret: {
+            type: "string",
+            nullable: true,
+            description:
+              "Optional name of a Kubernetes `docker-registry` secret in the challenge namespace. When provided, an `imagePullSecrets` entry is added to the Pod spec so the kubelet can authenticate to a private registry.",
+            examples: ["my-registry-secret"],
+          },
+          prefix: {
+            type: "string",
+            nullable: true,
+            description:
+              "Optional subdomain prefix for web challenges. When set, the Ingress hostname becomes `{prefix}-{team_id}-{challenge_id}.{root_domain}` instead of `{team_id}-{challenge_id}.{root_domain}`.",
+            examples: ["web-intro"],
+          },
+          tcp_hostname: {
+            type: "string",
+            nullable: true,
+            description:
+              "Optional hostname for TCP challenges shown in the connection string. When set, overrides the TCP_HOST and ROOT_DOMAIN environment variables for the `nc <host> <port>` output.",
+            examples: ["sillyctf.psuccso.org"],
+          },
+          tls_enabled: {
+            type: "boolean",
+            default: false,
+            description:
+              "When true, adds a TLS section to the Ingress resource. Use when the Ingress controller manages certificates.",
+          },
+          https_urls: {
+            type: "boolean",
+            default: false,
+            description:
+              "When true, reports https:// URLs to players even without Ingress TLS. Use when TLS is terminated elsewhere (e.g., external load balancer).",
+          },
           env_vars: {
             type: "object",
             description:
@@ -228,6 +261,7 @@ export async function deploy(fastify, opts) {
       expiresAt,
       memoryLimit: d.memory_limit,
       cpuLimit: d.cpu_limit,
+      imagePullSecret: d.image_pull_secret,
       envVars: d.env_vars,
       type: d.type,
     });
@@ -240,7 +274,8 @@ export async function deploy(fastify, opts) {
       expiresAt,
     });
 
-    const protocol = process.env.TLS_ENABLED === "false" ? "http" : "https";
+    const tlsEnabled = d.tls_enabled === true;
+    const protocol = (tlsEnabled || d.https_urls) ? "https" : "http";
     const root = process.env.ROOT_DOMAIN || "sillyctf.psuccso.org";
     let connectionInfo;
 
@@ -250,6 +285,8 @@ export async function deploy(fastify, opts) {
         challengeId: d.challenge_id,
         port: d.internal_port,
         expiresAt,
+        prefix: d.prefix,
+        tlsEnabled,
       });
       const host = ingress.spec.rules[0].host;
       connectionInfo = `${protocol}://${host}`;
@@ -283,14 +320,37 @@ export async function deploy(fastify, opts) {
           details: e.response?.body || undefined 
         });
       }
+      // Store connection_info as annotation for status/renew lookups
+      try {
+        await appsV1.patchNamespacedDeployment(
+          name, NAMESPACE,
+          { metadata: { annotations: { "ctfd-orchestrator/connection-info": connectionInfo } } },
+          undefined, undefined, undefined, undefined, undefined,
+          { headers: { "Content-Type": "application/strategic-merge-patch+json" } }
+        );
+      } catch (e) {
+        console.warn("Failed to annotate deployment with connection info:", e.message);
+      }
     } else {
       // tcp: Service is NodePort
       try {
         await appsV1.createNamespacedDeployment(NAMESPACE, deployment);
         const svcRes = await coreV1.createNamespacedService(NAMESPACE, service);
         const nodePort = svcRes.body.spec?.ports?.[0]?.nodePort;
-        const tcpHost = process.env.TCP_HOST || process.env.ROOT_DOMAIN || root;
+        const tcpHost = d.tcp_hostname || process.env.TCP_HOST || process.env.ROOT_DOMAIN || root;
         connectionInfo = nodePort ? `nc ${tcpHost} ${nodePort}` : `nc ${tcpHost} <nodeport>`;
+
+        // Store connection_info as annotation for status/renew lookups
+        try {
+          await appsV1.patchNamespacedDeployment(
+            name, NAMESPACE,
+            { metadata: { annotations: { "ctfd-orchestrator/connection-info": connectionInfo } } },
+            undefined, undefined, undefined, undefined, undefined,
+            { headers: { "Content-Type": "application/strategic-merge-patch+json" } }
+          );
+        } catch (annotErr) {
+          console.warn("Failed to annotate deployment with connection info:", annotErr.message);
+        }
       } catch (e) {
         // Log detailed error for debugging
         console.error("Failed to create Kubernetes resources:", {

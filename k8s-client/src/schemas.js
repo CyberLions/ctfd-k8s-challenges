@@ -9,6 +9,11 @@ export const deployBody = z.object({
   internal_port: z.number().int().positive().default(80),
   memory_limit: z.string().default("128Mi"),
   cpu_limit: z.string().optional(),
+  image_pull_secret: z.string().optional(),
+  prefix: z.string().optional(),
+  tcp_hostname: z.string().optional(),
+  tls_enabled: z.boolean().optional().default(false),
+  https_urls: z.boolean().optional().default(false),
   env_vars: z.record(z.string()).optional().default({}),
 });
 
@@ -27,4 +32,8 @@ export const renewBody = z.object({
 export const statusQuery = z.object({
   team_id: z.string().min(1, "team_id is required"),
   challenge_id: z.string().min(1, "challenge_id is required"),
+});
+
+export const statusAllQuery = z.object({
+  team_id: z.string().min(1, "team_id is required"),
 });

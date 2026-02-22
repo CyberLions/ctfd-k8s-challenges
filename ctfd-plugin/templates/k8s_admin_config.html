@@ -67,7 +67,27 @@
           </div>
           <div id="test_connection_result" class="mt-2" style="display: none;"></div>
         </div>
-        
+
+        <div class="form-group">
+          <label for="proxy_service_url">
+            Proxy Service URL
+            <small class="form-text text-muted">
+              <strong>Optional.</strong> Use when CTFd and the k8s-client are on different clusters connected via a VPN proxy.
+              Set this to the in-cluster proxy endpoint (e.g., <code>http://pritunl-nginx-proxy.pritunl</code>).
+              Requests will be sent to this address with the <code>Host</code> header set to the Orchestrator URL's hostname,
+              so the remote ingress can route traffic correctly.
+            </small>
+          </label>
+          <input
+            id="proxy_service_url"
+            type="url"
+            name="proxy_service_url"
+            class="form-control"
+            placeholder="http://pritunl-nginx-proxy.pritunl"
+            value="{{ proxy_service_url }}"
+          >
+        </div>
+
         <hr>
         <h4 class="mb-3">Network Configuration</h4>
         
@@ -75,41 +95,120 @@
           <label for="domain_suffix">
             Domain Suffix
             <small class="form-text text-muted">
-              Domain suffix for HTTP/web challenges (e.g., <code>.sillyctf-challenges.psuccso.org</code>). 
+              Domain suffix for HTTP/web challenges (e.g., <code>.sillyctf-challenges.psuccso.org</code>).
               Challenges will be accessible at <code>{prefix}-{random}.sillyctf-challenges.psuccso.org</code>
             </small>
           </label>
-          <input 
-            id="domain_suffix" 
-            type="text" 
-            name="domain_suffix" 
-            class="form-control" 
-            placeholder=".sillyctf-challenges.psuccso.org" 
+          <input
+            id="domain_suffix"
+            type="text"
+            name="domain_suffix"
+            class="form-control"
+            placeholder=".sillyctf-challenges.psuccso.org"
             value="{{ domain_suffix }}"
             required
           >
         </div>
+
+        <div class="form-group">
+          <div class="form-check">
+            <input
+              id="tls_enabled"
+              type="checkbox"
+              name="tls_enabled"
+              class="form-check-input"
+              value="1"
+              {{ "checked" if tls_enabled else "" }}
+            >
+            <label class="form-check-label" for="tls_enabled">
+              Enable Ingress TLS
+              <small class="form-text text-muted">
+                Adds a TLS section to Ingress resources. Use this when the Ingress controller manages certificates (e.g., cert-manager).
+              </small>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div class="form-check">
+            <input
+              id="https_urls"
+              type="checkbox"
+              name="https_urls"
+              class="form-check-input"
+              value="1"
+              {{ "checked" if https_urls else "" }}
+            >
+            <label class="form-check-label" for="https_urls">
+              Report HTTPS URLs
+              <small class="form-text text-muted">
+                Show <code>https://</code> URLs to players for web challenges, even without Ingress TLS above.
+                Use this when TLS is terminated elsewhere (e.g., external load balancer, Cloudflare).
+              </small>
+            </label>
+          </div>
+        </div>
         
+        <div class="form-group">
+          <label for="tcp_hostname">
+            TCP Challenges Hostname
+            <small class="form-text text-muted">
+              Hostname shown to players for TCP/netcat challenges (e.g., <code>sillyctf.psuccso.org</code>).
+              Connection strings will appear as <code>nc sillyctf.psuccso.org &lt;port&gt;</code>.
+            </small>
+          </label>
+          <input
+            id="tcp_hostname"
+            type="text"
+            name="tcp_hostname"
+            class="form-control"
+            placeholder="sillyctf.psuccso.org"
+            value="{{ tcp_hostname }}"
+          >
+        </div>
+
         <div class="form-group">
           <label for="tcp_port_range">
             TCP Port Range
             <small class="form-text text-muted">
-              Port range for TCP challenges (format: <code>30000-32767</code>). 
+              Port range for TCP challenges (format: <code>30000-32767</code>).
               Random unique ports from this range will be assigned to TCP challenge instances.
             </small>
           </label>
-          <input 
-            id="tcp_port_range" 
-            type="text" 
-            name="tcp_port_range" 
-            class="form-control" 
-            placeholder="30000-32767" 
+          <input
+            id="tcp_port_range"
+            type="text"
+            name="tcp_port_range"
+            class="form-control"
+            placeholder="30000-32767"
             value="{{ tcp_port_range }}"
             pattern="[0-9]+-[0-9]+"
             required
           >
         </div>
         
+        <hr>
+        <h4 class="mb-3">Registry Configuration</h4>
+
+        <div class="form-group">
+          <label for="registry_pull_secret">
+            Image Pull Secret
+            <small class="form-text text-muted">
+              Name of the Kubernetes <code>docker-registry</code> secret used to pull private container images.
+              The secret must already exist in the challenge namespace. Leave blank if your images are public or the cluster is pre-configured.
+            </small>
+          </label>
+          <input
+            id="registry_pull_secret"
+            type="text"
+            name="registry_pull_secret"
+            class="form-control"
+            placeholder="e.g. my-registry-secret"
+            value="{{ registry_pull_secret }}"
+            pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?"
+          >
+        </div>
+
         <hr>
         <h4 class="mb-3">Container Limits</h4>
         
@@ -199,34 +298,37 @@
   const resultDiv = document.getElementById('test_connection_result');
   const orchestratorUrlInput = document.getElementById('orchestrator_url');
   const apiKeyInput = document.getElementById('api_key');
-  
+  const proxyServiceUrlInput = document.getElementById('proxy_service_url');
+
   if (!testBtn || !resultDiv) return;
-  
+
   testBtn.addEventListener('click', async function() {
     const orchestratorUrl = orchestratorUrlInput.value.trim();
     const apiKey = apiKeyInput.value.trim();
-    
+    const proxyServiceUrl = proxyServiceUrlInput ? proxyServiceUrlInput.value.trim() : '';
+
     if (!orchestratorUrl) {
       showResult('error', 'Please enter an Orchestrator URL first');
       return;
     }
-    
+
     // Disable button and show loading state
     testBtn.disabled = true;
     testBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
     resultDiv.style.display = 'none';
-    
+
     try {
       const params = new URLSearchParams();
       if (orchestratorUrl) params.append('orchestrator_url', orchestratorUrl);
       if (apiKey) params.append('api_key', apiKey);
+      if (proxyServiceUrl) params.append('proxy_service_url', proxyServiceUrl);
       const url = '{{ request.script_root or "" }}/admin/plugins/k8s-challenges/test-connection?' + params.toString();
       const response = await fetch(url, { method: 'GET' });
       
       const data = await response.json();
       
       if (data.success) {
-        showResult('success', 'Connection successful! Orchestrator is reachable.');
+        showResult('success', data.message || 'Connection successful! Orchestrator is reachable.');
       } else {
         showResult('error', data.error || 'Connection failed');
       }

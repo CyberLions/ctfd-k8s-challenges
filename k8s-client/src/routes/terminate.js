@@ -44,6 +44,7 @@ export async function terminate(fastify, opts) {
                 "Optional human‑readable message. For example, may state that resources were already gone when the request was made.",
               examples: ["Resources were already gone or not found"],
             },
+            success: { type: "boolean" },
           },
         },
         400: {
