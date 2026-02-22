@@ -61,6 +61,7 @@ export async function renew(fastify, opts) {
             },
             success: { type: "boolean" },
             connection_info: { type: "string" },
+            started_by: { type: "string", nullable: true },
           },
         },
         400: {
@@ -199,6 +200,7 @@ export async function renew(fastify, opts) {
 
     const rawAnnotation = deployment.metadata?.annotations?.["ctfd-orchestrator/connection-info"] || "";
     const connectionInfo = await ensureConnectionInfo(team_id, challenge_id, rawAnnotation);
+    const startedBy = deployment.metadata?.annotations?.["ctfd-orchestrator/started-by"] || null;
 
     console.log("Renew successful:", {
       team_id,
@@ -213,6 +215,7 @@ export async function renew(fastify, opts) {
       expires_at: newExpiresAt,
       success: true,
       connection_info: connectionInfo,
+      started_by: startedBy,
     });
   });
 }

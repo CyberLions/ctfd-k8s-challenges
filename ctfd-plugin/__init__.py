@@ -19,7 +19,7 @@ from CTFd.utils import get_config
 from CTFd.utils.decorators import admins_only, authed_only
 from CTFd.utils.user import get_current_user
 
-from .models import ContainerChallenge, ContainerDynamicChallenge
+from .models import ContainerChallenge, ContainerDynamicChallenge, ContainerEvent
 
 # Column names allowed when constructing/updating challenges
 # Note: Dynamic challenge uses prefixed column names (container_initial, container_decay, etc.)
@@ -502,6 +502,29 @@ def _fix_connection_info(data):
     return data
 
 
+def _record_event(team_id, challenge_id, event_type, user_name=None):
+    """Write a container lifecycle event for team-wide notification polling."""
+    import time
+    # Resolve challenge name for display
+    chal_name = None
+    try:
+        row = Challenges.query.filter_by(id=int(challenge_id)).first()
+        if row:
+            chal_name = row.name
+    except Exception:
+        pass
+    evt = ContainerEvent(
+        team_id=str(team_id),
+        challenge_id=str(challenge_id),
+        challenge_name=chal_name or f"Challenge {challenge_id}",
+        event_type=event_type,
+        user_name=user_name,
+        timestamp=time.time(),
+    )
+    db.session.add(evt)
+    db.session.commit()
+
+
 def _container_api(app):
     @app.route("/api/v1/container/start", methods=["POST"])
     @authed_only
@@ -551,8 +574,13 @@ def _container_api(app):
         if _get_config("k8s_https_urls", ""):
             body["https_urls"] = True
 
+        user = get_current_user()
+        user_name = getattr(user, "name", None) or str(aid)
+        body["started_by"] = user_name
+
         code, out = _orchestrator_request("POST", "/deploy", json=body)
         if code in (200, 201):
+            _record_event(aid, str(row.id), "start", user_name)
             return {"success": True, "data": _fix_connection_info(out)}
         if code == 409:
             # Instance already running for this team — return its current info
@@ -587,6 +615,9 @@ def _container_api(app):
             return {"success": False, "error": "challenge_id required"}, 400
         code, out = _orchestrator_request("POST", "/terminate", json={"team_id": aid, "challenge_id": str(cid)})
         if code == 200:
+            user = get_current_user()
+            user_name = getattr(user, "name", None) or str(aid)
+            _record_event(aid, str(cid), "stop", user_name)
             return {"success": True, "data": out}
         return {"success": False, "error": out.get("error", "Orchestrator error")}, max(400, code or 500)
 
@@ -605,6 +636,9 @@ def _container_api(app):
             body["duration"] = int(data["duration"])
         code, out = _orchestrator_request("POST", "/renew", json=body)
         if code == 200:
+            user = get_current_user()
+            user_name = getattr(user, "name", None) or str(aid)
+            _record_event(aid, str(cid), "reset", user_name)
             return {"success": True, "data": _fix_connection_info(out)}
         return {"success": False, "error": out.get("error", "Orchestrator error")}, max(400, code or 500)
 
@@ -621,6 +655,38 @@ def _container_api(app):
                 _fix_connection_info(instances[cid_key])
             return {"success": True, "data": instances}
         return {"success": True, "data": {}}
+
+    @app.route("/api/v1/container/events", methods=["GET"])
+    @authed_only
+    def _events():
+        import time
+        aid = _account_id()
+        if not aid:
+            return {"success": False, "error": "Not authenticated"}, 401
+        since = request.args.get("since", type=float, default=0.0)
+        # Garbage-collect events older than 5 minutes
+        cutoff = time.time() - 300
+        ContainerEvent.query.filter(ContainerEvent.timestamp < cutoff).delete()
+        db.session.commit()
+        # Fetch events for this team since the given timestamp
+        rows = (
+            ContainerEvent.query
+            .filter(ContainerEvent.team_id == str(aid))
+            .filter(ContainerEvent.timestamp > since)
+            .order_by(ContainerEvent.timestamp.asc())
+            .all()
+        )
+        events = [
+            {
+                "challenge_id": r.challenge_id,
+                "challenge_name": r.challenge_name,
+                "event_type": r.event_type,
+                "user_name": r.user_name,
+                "timestamp": r.timestamp,
+            }
+            for r in rows
+        ]
+        return {"success": True, "events": events}
 
 
 def _admin_routes(app):

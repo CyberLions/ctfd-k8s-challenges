@@ -1,4 +1,4 @@
-import { baseLabels, resourceName, getNamespace, getRootDomain } from "./k8s.js";
+import { baseLabels, LABELS, resourceName, getNamespace, getRootDomain } from "./k8s.js";
 
 /**
  * @param {Object} opts
@@ -17,6 +17,14 @@ export function buildDeployment(opts) {
   const name = resourceName(opts.teamId, opts.challengeId);
   const ns = getNamespace();
   const labels = baseLabels(opts.teamId, opts.challengeId, opts.expiresAt);
+
+  // Stable labels used for the immutable selector — must NOT include
+  // mutable fields like expires_at which change on renewal.
+  const selectorLabels = {
+    [LABELS.MANAGED_BY]: "ctfd-orchestrator",
+    [LABELS.TEAM_ID]: String(opts.teamId),
+    [LABELS.CHALLENGE_ID]: String(opts.challengeId),
+  };
 
   const env = Object.entries(opts.envVars || {}).map(([k, v]) => ({
     name: k,
@@ -42,7 +50,7 @@ export function buildDeployment(opts) {
     },
     spec: {
       replicas: 1,
-      selector: { matchLabels: { ...labels } },
+      selector: { matchLabels: selectorLabels },
       template: {
         metadata: { labels: { ...labels } },
         spec: {

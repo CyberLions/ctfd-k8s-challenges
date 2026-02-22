@@ -14,6 +14,7 @@ export const deployBody = z.object({
   tcp_hostname: z.string().optional(),
   tls_enabled: z.boolean().optional().default(false),
   https_urls: z.boolean().optional().default(false),
+  started_by: z.string().optional(),
   env_vars: z.record(z.string()).optional().default({}),
 });
 

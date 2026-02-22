@@ -4,14 +4,14 @@
 {{ super() }}
 
 <div id="container-challenge-ctl" class="mt-3 mb-4" data-challenge-id="{{ challenge.id }}">
-  <div id="container-idle">
+  <div id="container-idle" style="display:none">
     <button type="button" class="btn btn-primary w-100" id="container-start-btn" onclick="window.k8sStartContainer(this)">
       <i class="fas fa-play"></i> Start Instance
     </button>
   </div>
-  <div id="container-loading" style="display:none">
+  <div id="container-loading">
     <button type="button" class="btn btn-primary w-100" disabled>
-      <span class="spinner-border spinner-border-sm"></span> Starting…
+      <span class="spinner-border spinner-border-sm"></span> <span id="container-loading-text">Loading…</span>
     </button>
   </div>
   <div id="container-active" style="display:none">
@@ -30,6 +30,9 @@
           <strong>Port:</strong> <code id="container-tcp-port"></code>
         </p>
       </div>
+      <p class="mb-2" id="container-started-by" style="display:none">
+        <strong>Started by:</strong> <span id="container-started-by-name"></span>
+      </p>
       <p class="mb-2">
         <strong>Expires in:</strong> <span id="container-timer" class="badge bg-warning text-dark">--:--:--</span>
       </p>

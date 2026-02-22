@@ -41,6 +41,7 @@ export async function status(fastify, opts) {
             success: { type: "boolean" },
             connection_info: { type: "string" },
             expires_at: { type: "integer", nullable: true },
+            started_by: { type: "string", nullable: true },
           },
         },
         400: {
@@ -123,6 +124,7 @@ export async function status(fastify, opts) {
     const connectionInfo = await ensureConnectionInfo(team_id, challenge_id, rawAnnotation);
     const expiresAtLabel = deployment.metadata?.labels?.[LABELS.EXPIRES_AT] || "";
     const expiresAt = expiresAtLabel ? parseInt(expiresAtLabel, 10) : null;
+    const startedBy = deployment.metadata?.annotations?.["ctfd-orchestrator/started-by"] || null;
 
     console.log("Status check successful:", {
       team_id,
@@ -137,6 +139,7 @@ export async function status(fastify, opts) {
       success: true,
       connection_info: connectionInfo,
       expires_at: expiresAt,
+      started_by: startedBy,
     });
   });
 }

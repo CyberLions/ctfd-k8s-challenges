@@ -1,8 +1,24 @@
 """
 Container challenge: child of Challenges with K8s-specific columns.
 Two types: static container and dynamic container challenges.
+Also includes ContainerEvent for team-wide lifecycle notifications.
 """
+import time
+
 from CTFd.models import Challenges, db
+
+
+class ContainerEvent(db.Model):
+    """Lightweight event log for team-wide container lifecycle notifications."""
+    __tablename__ = "container_events"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    team_id = db.Column(db.String(64), nullable=False, index=True)
+    challenge_id = db.Column(db.String(64), nullable=False)
+    challenge_name = db.Column(db.String(256), nullable=True)
+    event_type = db.Column(db.String(32), nullable=False)  # start, stop, reset, expired
+    user_name = db.Column(db.String(256), nullable=True)
+    timestamp = db.Column(db.Float, nullable=False, default=lambda: time.time())
 
 
 class ContainerChallenge(Challenges):

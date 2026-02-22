@@ -143,6 +143,13 @@ export async function deploy(fastify, opts) {
             description:
               "When true, reports https:// URLs to players even without Ingress TLS. Use when TLS is terminated elsewhere (e.g., external load balancer).",
           },
+          started_by: {
+            type: "string",
+            nullable: true,
+            description:
+              "Optional display name of the user who started this instance. Stored as a Kubernetes annotation for retrieval by status endpoints.",
+            examples: ["alice"],
+          },
           env_vars: {
             type: "object",
             description:
@@ -320,16 +327,18 @@ export async function deploy(fastify, opts) {
           details: e.response?.body || undefined 
         });
       }
-      // Store connection_info as annotation for status/renew lookups
+      // Store connection_info and started_by as annotations for status/renew lookups
       try {
+        const annotations = { "ctfd-orchestrator/connection-info": connectionInfo };
+        if (d.started_by) annotations["ctfd-orchestrator/started-by"] = d.started_by;
         await appsV1.patchNamespacedDeployment(
           name, NAMESPACE,
-          { metadata: { annotations: { "ctfd-orchestrator/connection-info": connectionInfo } } },
+          { metadata: { annotations } },
           undefined, undefined, undefined, undefined, undefined,
           { headers: { "Content-Type": "application/strategic-merge-patch+json" } }
         );
       } catch (e) {
-        console.warn("Failed to annotate deployment with connection info:", e.message);
+        console.warn("Failed to annotate deployment:", e.message);
       }
     } else {
       // tcp: Service is NodePort
@@ -340,16 +349,18 @@ export async function deploy(fastify, opts) {
         const tcpHost = d.tcp_hostname || process.env.TCP_HOST || process.env.ROOT_DOMAIN || root;
         connectionInfo = nodePort ? `nc ${tcpHost} ${nodePort}` : `nc ${tcpHost} <nodeport>`;
 
-        // Store connection_info as annotation for status/renew lookups
+        // Store connection_info and started_by as annotations
         try {
+          const annotations = { "ctfd-orchestrator/connection-info": connectionInfo };
+          if (d.started_by) annotations["ctfd-orchestrator/started-by"] = d.started_by;
           await appsV1.patchNamespacedDeployment(
             name, NAMESPACE,
-            { metadata: { annotations: { "ctfd-orchestrator/connection-info": connectionInfo } } },
+            { metadata: { annotations } },
             undefined, undefined, undefined, undefined, undefined,
             { headers: { "Content-Type": "application/strategic-merge-patch+json" } }
           );
         } catch (annotErr) {
-          console.warn("Failed to annotate deployment with connection info:", annotErr.message);
+          console.warn("Failed to annotate deployment:", annotErr.message);
         }
       } catch (e) {
         // Log detailed error for debugging

@@ -50,7 +50,7 @@ CTFd._internal.challenge.submit = function (preview) {
     return input ? input.value : null;
   }
 
-  function setState(root, state) {
+  function setState(root, state, loadingText) {
     var idle = root.querySelector("#container-idle");
     var loading = root.querySelector("#container-loading");
     var active = root.querySelector("#container-active");
@@ -59,7 +59,11 @@ CTFd._internal.challenge.submit = function (preview) {
     loading.style.display = "none";
     active.style.display = "none";
     if (state === "idle") idle.style.display = "";
-    else if (state === "loading") loading.style.display = "";
+    else if (state === "loading") {
+      var textEl = loading.querySelector("#container-loading-text");
+      if (textEl) textEl.textContent = loadingText || "Loading\u2026";
+      loading.style.display = "";
+    }
     else if (state === "active") active.style.display = "";
   }
 
@@ -77,7 +81,19 @@ CTFd._internal.challenge.submit = function (preview) {
     var tcpHostEl = root.querySelector("#container-tcp-host");
     var tcpPortEl = root.querySelector("#container-tcp-port");
     var timerEl = root.querySelector("#container-timer");
+    var startedByEl = root.querySelector("#container-started-by");
+    var startedByNameEl = root.querySelector("#container-started-by-name");
     var info = (data && data.connection_info) || "";
+
+    // Show "Started by" if present
+    if (startedByEl && startedByNameEl) {
+      if (data && data.started_by) {
+        startedByNameEl.textContent = data.started_by;
+        startedByEl.style.display = "";
+      } else {
+        startedByEl.style.display = "none";
+      }
+    }
 
     if (/^https?:\/\//i.test(info)) {
       // Web challenge — show clickable URL
@@ -149,23 +165,34 @@ CTFd._internal.challenge.submit = function (preview) {
 
     _lastCheckedCid = cid;
 
+    // Show loading state while fetching so stale data from a previous challenge is cleared
+    setState(root, "loading");
+
     fetchFn(urlRoot + "/api/v1/container/status?challenge_id=" + encodeURIComponent(cid), {
       method: "GET",
       credentials: "same-origin",
     })
       .then(function (r) { return r.json(); })
       .then(function (r) {
+        // Discard response if user has switched to a different challenge
+        if (getChallengeId() !== cid) return;
+
+        var currentRoot = document.getElementById("container-challenge-ctl");
         if (r && r.success && r.data) {
           var st = r.data.status;
-          if (st === "Running" || st === "Pending") {
-            // Re-fetch root in case DOM changed
-            var currentRoot = document.getElementById("container-challenge-ctl");
-            if (currentRoot) applyActive(currentRoot, r.data);
+          if ((st === "Running" || st === "Pending") && currentRoot) {
+            applyActive(currentRoot, r.data);
+            return;
           }
         }
+        // No running instance — show idle (start button)
+        if (currentRoot) setState(currentRoot, "idle");
       })
       .catch(function () {
-        // Silently fail — leave in idle state
+        // On error, fall back to idle so the user can still interact
+        if (getChallengeId() !== cid) return;
+        var currentRoot = document.getElementById("container-challenge-ctl");
+        if (currentRoot) setState(currentRoot, "idle");
       });
   };
 
@@ -187,6 +214,9 @@ CTFd._internal.challenge.submit = function (preview) {
     subtree: true,
   });
 
+  // Self-event suppression map: prevents toasts for own actions
+  if (!window.__k8sSelfEvents) window.__k8sSelfEvents = {};
+
   window.k8sStartContainer = function (btn) {
     var root = getRoot(btn);
     var cid = getChallengeId();
@@ -194,7 +224,8 @@ CTFd._internal.challenge.submit = function (preview) {
       alert("Unable to determine challenge ID");
       return;
     }
-    setState(root, "loading");
+    window.__k8sSelfEvents["start-" + cid] = true;
+    setState(root, "loading", "Starting\u2026");
     fetchFn(urlRoot + "/api/v1/container/start", {
       method: "POST",
       credentials: "same-origin",
@@ -223,6 +254,7 @@ CTFd._internal.challenge.submit = function (preview) {
       alert("Unable to determine challenge ID");
       return;
     }
+    window.__k8sSelfEvents["stop-" + cid] = true;
     fetchFn(urlRoot + "/api/v1/container/stop", {
       method: "POST",
       credentials: "same-origin",
@@ -250,6 +282,7 @@ CTFd._internal.challenge.submit = function (preview) {
       alert("Unable to determine challenge ID");
       return;
     }
+    window.__k8sSelfEvents["reset-" + cid] = true;
     fetchFn(urlRoot + "/api/v1/container/renew", {
       method: "POST",
       credentials: "same-origin",

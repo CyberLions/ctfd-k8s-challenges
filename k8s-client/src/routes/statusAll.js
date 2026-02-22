@@ -36,6 +36,7 @@ export async function statusAll(fastify, opts) {
                   status: { type: "string" },
                   connection_info: { type: "string" },
                   expires_at: { type: "integer", nullable: true },
+                  started_by: { type: "string", nullable: true },
                 },
               },
             },
@@ -85,15 +86,16 @@ export async function statusAll(fastify, opts) {
         const expiresAtStr = dep.metadata?.labels?.[LABELS.EXPIRES_AT] || "";
         const expiresAt = expiresAtStr ? parseInt(expiresAtStr, 10) : null;
         const status = podStatusMap[chalId] || "Pending";
+        const startedBy = dep.metadata?.annotations?.["ctfd-orchestrator/started-by"] || null;
 
         // Queue up connection_info resolution (may need reconstruction)
         infoPromises.push(
           ensureConnectionInfo(team_id, chalId, rawAnnotation)
             .then((info) => {
-              instances[chalId] = { status, connection_info: info, expires_at: expiresAt };
+              instances[chalId] = { status, connection_info: info, expires_at: expiresAt, started_by: startedBy };
             })
             .catch(() => {
-              instances[chalId] = { status, connection_info: "", expires_at: expiresAt };
+              instances[chalId] = { status, connection_info: "", expires_at: expiresAt, started_by: startedBy };
             })
         );
       }
