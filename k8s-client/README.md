@@ -20,6 +20,25 @@ For local dev with Minikube/Kind:
 
 See `.env.example` for all configuration options.
 
+## Kubernetes Deployment
+
+Manifests for deploying the orchestrator to a Kubernetes cluster are in the `k8s/` directory:
+
+- **`k8s/rbac.yaml`** — Creates the challenge namespace, ServiceAccount, Role, and RoleBinding. The orchestrator pod runs in `silly-ctf` and is granted permissions to manage Deployments, Services, Ingresses, and Pods in the `silly-ctf-challenges` namespace.
+- **`k8s/deployment.yaml`** — Deployment manifest for the orchestrator pod, configured with `serviceAccountName: ctfd-orchestrator` for in-cluster API access.
+
+### Deploy to cluster
+
+```bash
+# 1. Create namespace, service account, and RBAC
+kubectl apply -f k8s/rbac.yaml
+
+# 2. Deploy the orchestrator
+kubectl apply -f k8s/deployment.yaml
+```
+
+The ServiceAccount and RoleBinding handle authentication automatically — when running in-cluster, the pod uses its mounted service account token to authenticate with the Kubernetes API.
+
 **On‑prem deployment:** k8s-client is not exposed to the internet. It only needs access to the Kubernetes API (in‑cluster when `KUBERNETES_SERVICE_HOST` is set, or kubeconfig). CTFd (cloud) talks to the orchestrator via your **existing proxy**: the proxy must forward to the internal k8s-client and set the `Host` header to that target. See `proxy-config/` for examples.
 
 ## How the orchestrator talks to Kubernetes

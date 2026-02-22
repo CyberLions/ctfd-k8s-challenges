@@ -1,0 +1,54 @@
+# RBAC setup for the ctfd-orchestrator pod.
+# The orchestrator pod runs in "silly-ctf" but manages resources in "silly-ctf-challenges".
+# Apply with: kubectl apply -f k8s/rbac.yaml
+
+# 1. Namespace for challenge instances
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: silly-ctf-challenges
+
+---
+# 2. ServiceAccount in the namespace where the orchestrator pod runs
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ctfd-orchestrator
+  namespace: silly-ctf
+
+---
+# 3. Role in the challenges namespace granting permissions to manage challenge resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ctfd-orchestrator
+  namespace: silly-ctf-challenges
+rules:
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["create", "get", "update", "delete", "list", "watch", "patch"]
+- apiGroups: [""]
+  resources: ["services", "pods"]
+  verbs: ["create", "get", "delete", "list", "watch"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["create", "get", "delete", "list", "watch"]
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get"]
+
+---
+# 4. RoleBinding — binds the ServiceAccount in silly-ctf to the Role in silly-ctf-challenges
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ctfd-orchestrator
+  namespace: silly-ctf-challenges
+subjects:
+- kind: ServiceAccount
+  name: ctfd-orchestrator
+  namespace: silly-ctf
+roleRef:
+  kind: Role
+  name: ctfd-orchestrator
+  apiGroup: rbac.authorization.k8s.io

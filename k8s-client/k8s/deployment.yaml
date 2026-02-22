@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ctfd-k8s-client
+  namespace: silly-ctf
+  labels:
+    workload.user.cattle.io/workloadselector: apps.deployment-silly-ctf-ctfd-k8s-client
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+  selector:
+    matchLabels:
+      workload.user.cattle.io/workloadselector: apps.deployment-silly-ctf-ctfd-k8s-client
+  template:
+    metadata:
+      labels:
+        workload.user.cattle.io/workloadselector: apps.deployment-silly-ctf-ctfd-k8s-client
+      namespace: silly-ctf
+    spec:
+      serviceAccountName: ctfd-orchestrator
+      containers:
+        - name: ctfd-k8s-client
+          image: registry.psuccso.org/ctfd-k8s-challenges/k8s-client
+          imagePullPolicy: Always
+          ports:
+            - name: api
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: PORT
+              value: '3000'
+            - name: X_API_KEY
+              value: WaEy7REj0eA5Z2rdxT
+            - name: CHALLENGE_NAMESPACE
+              value: silly-ctf-challenges
+            - name: INGRESS_CLASS
+              value: nginx
+            - name: TLS_ENABLED
+              value: 'true'
+            - name: TLS_CERT_SECRET
+              value: wildcard-tls-cert
+            - name: REAPER_INTERVAL_MS
+              value: '60000'
+          resources: {}
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: false
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      terminationGracePeriodSeconds: 30
