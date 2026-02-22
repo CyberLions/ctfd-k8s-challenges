@@ -45,7 +45,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./k8s-client
-          file: .docker/Dockerfile
+          file: k8s-client/.docker/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
