@@ -235,7 +235,22 @@ CTFd._internal.challenge.submit = function (preview) {
       .then(function (r) { return r.json(); })
       .then(function (r) {
         if (r && r.success && r.data) {
-          applyActive(root, r.data);
+          var data = r.data;
+          var remaining = 30;
+          var textEl = root.querySelector("#container-loading-text");
+          function updateCountdown() {
+            if (textEl) textEl.textContent = "Spinning up\u2026 " + remaining + "s";
+          }
+          updateCountdown();
+          var countdown = setInterval(function () {
+            remaining--;
+            if (remaining <= 0) {
+              clearInterval(countdown);
+              applyActive(root, data);
+            } else {
+              updateCountdown();
+            }
+          }, 1000);
         } else {
           alert((r && r.error) || "Failed to start instance");
           setState(root, "idle");
