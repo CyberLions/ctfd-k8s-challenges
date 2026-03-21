@@ -58,7 +58,7 @@ class ContainerChallengeClass(BaseChallenge):
     scripts = {
         "create": "/plugins/k8s-challenges/assets/create.js",
         "update": "/plugins/k8s-challenges/assets/update.js",
-        "view": "/plugins/k8s-challenges/assets/view.js",
+        "view": "/plugins/k8s-challenges/assets/view.js?v=2",
     }
     challenge_model = ContainerChallenge
 
@@ -199,7 +199,7 @@ class ContainerDynamicChallengeClass(BaseChallenge):
     scripts = {
         "create": "/plugins/k8s-challenges/assets/create-dynamic.js",
         "update": "/plugins/k8s-challenges/assets/update-dynamic.js",
-        "view": "/plugins/k8s-challenges/assets/view-dynamic.js",
+        "view": "/plugins/k8s-challenges/assets/view-dynamic.js?v=2",
     }
     challenge_model = ContainerDynamicChallenge
 
